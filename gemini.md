@@ -615,6 +615,8 @@ Retourne le fichier `.pkpass` à ouvrir dans l'app Wallet sur iPhone.
 
 **Réponse :** Binaire `application/vnd.apple.pkpass` (téléchargement du fichier)
 
+**Note :** Le `.pkpass` contient un `webServiceURL` et un `authenticationToken` (= `wallet_token`) permettant à Apple Wallet d'enregistrer l'appareil pour les mises à jour push.
+
 ### Google Wallet
 ```
 GET /public/wallet/google/{walletToken}
@@ -628,6 +630,77 @@ Redirige vers l'URL "Ajouter à Google Wallet".
 **Réponse :** Redirection HTTP 302 vers `https://pay.google.com/gp/v/save/{jwt}`
 
 **Note :** Ces deux routes ne nécessitent pas de token JWT.
+
+---
+
+## PassKit Web Service (Apple Wallet — mises à jour en temps réel)
+
+Endpoints implémentant le protocole PassKit Web Service d'Apple. Ils sont appelés automatiquement par iOS — **jamais par le frontend**.
+
+> **Base URL** : `{APP_BASE_URL}/public/wallet/apple/update/` (correspond au `webServiceURL` dans le .pkpass)
+> **Auth** : Header `Authorization: ApplePass <wallet_token>` envoyé par iOS
+
+### Enregistrement d'un appareil
+```
+POST /public/wallet/apple/update/v1/devices/{deviceLibraryIdentifier}/registrations/{passTypeIdentifier}/{serialNumber}
+```
+Body : `{ "pushToken": "apns_push_token" }`
+Réponse : `201 Created` (nouveau) ou `200 OK` (déjà enregistré)
+
+### Désenregistrement d'un appareil
+```
+DELETE /public/wallet/apple/update/v1/devices/{deviceLibraryIdentifier}/registrations/{passTypeIdentifier}/{serialNumber}
+```
+Réponse : `200 OK`
+
+### Liste des passes à mettre à jour
+```
+GET /public/wallet/apple/update/v1/devices/{deviceLibraryIdentifier}/registrations/{passTypeIdentifier}
+```
+Réponse : `200 OK` avec `{ "lastUpdated": "timestamp", "serialNumbers": [...] }` ou `204 No Content`
+
+### Téléchargement du pass mis à jour
+```
+GET /public/wallet/apple/update/v1/passes/{passTypeIdentifier}/{serialNumber}
+```
+Réponse : `.pkpass` mis à jour
+
+### Log Apple
+```
+POST /public/wallet/apple/update/v1/log
+```
+Réponse : `200 OK`
+
+### Activation (variables d'env requises)
+```env
+APPLE_WALLET_ENABLED=true
+APPLE_WALLET_PASS_TYPE_IDENTIFIER=pass.com.yourcompany.loyaltycard
+APPLE_WALLET_TEAM_IDENTIFIER=YOUR_TEAM_ID
+APPLE_APNS_KEY_ID=YOUR_APNS_KEY_ID
+APPLE_APNS_PRIVATE_KEY_PATH=/path/to/apns-key.p8
+```
+Par défaut `APPLE_WALLET_ENABLED=false` — les notifications ne sont pas envoyées sans les clés.
+
+---
+
+## Synchronisation Google Wallet (mises à jour en temps réel)
+
+Lors de chaque `POST /api/transactions`, le backend appelle **automatiquement** l'API Google Wallet pour mettre à jour le solde de l'objet de fidélité.
+
+### Activation (variables d'env requises)
+```env
+GOOGLE_WALLET_ENABLED=true
+GOOGLE_WALLET_ISSUER_ID=your_issuer_id
+GOOGLE_WALLET_SERVICE_ACCOUNT_KEY_PATH=/path/to/service-account-key.json
+```
+Par défaut `GOOGLE_WALLET_ENABLED=false`.
+
+**Flow lors d'une transaction :**
+1. Transaction créée et sauvegardée en BDD
+2. `AppleWalletPushService::notifyUpdate()` → envoie une notification APNs à chaque appareil enregistré → iOS re-télécharge le `.pkpass`
+3. `GoogleWalletSyncService::syncCard()` → obtient un token OAuth2 via service account → `PATCH https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/{id}` avec la nouvelle valeur
+
+---
 
 ## Transactions
 

@@ -5,6 +5,8 @@ namespace App\Controller;
 use App\Entity\Transaction;
 use App\Entity\Merchant;
 use App\Entity\LoyaltyCard;
+use App\Service\AppleWalletPushService;
+use App\Service\GoogleWalletSyncService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -15,8 +17,11 @@ class TransactionController extends AbstractController
 {
     private $entityManager;
 
-    public function __construct(EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        EntityManagerInterface $entityManager,
+        private readonly AppleWalletPushService $appleWalletPushService,
+        private readonly GoogleWalletSyncService $googleWalletSyncService,
+    ) {
         $this->entityManager = $entityManager;
     }
 
@@ -90,6 +95,9 @@ class TransactionController extends AbstractController
 
         $this->entityManager->persist($transaction);
         $this->entityManager->flush();
+
+        $this->appleWalletPushService->notifyUpdate($card->getWalletToken());
+        $this->googleWalletSyncService->syncCard($card);
 
         return new JsonResponse([
             'id' => $transaction->getId(),

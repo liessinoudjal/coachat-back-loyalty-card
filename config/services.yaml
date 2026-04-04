@@ -39,5 +39,19 @@ services:
         arguments:
             $appBaseUrl: '%env(APP_BASE_URL)%'
 
+    App\Service\AppleWalletPushService:
+        arguments:
+            $enabled: '%env(bool:APPLE_WALLET_ENABLED)%'
+            $passTypeIdentifier: '%env(APPLE_WALLET_PASS_TYPE_IDENTIFIER)%'
+            $teamIdentifier: '%env(APPLE_WALLET_TEAM_IDENTIFIER)%'
+            $keyId: '%env(APPLE_APNS_KEY_ID)%'
+            $privateKeyPath: '%env(APPLE_APNS_PRIVATE_KEY_PATH)%'
+
+    App\Service\GoogleWalletSyncService:
+        arguments:
+            $enabled: '%env(bool:GOOGLE_WALLET_ENABLED)%'
+            $issuerId: '%env(GOOGLE_WALLET_ISSUER_ID)%'
+            $serviceAccountKeyPath: '%env(GOOGLE_WALLET_SERVICE_ACCOUNT_KEY_PATH)%'
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
