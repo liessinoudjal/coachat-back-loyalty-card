@@ -16,9 +16,6 @@ class LoyaltyCard
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\Column(length: 255, unique: true)]
-    private ?string $qrCode = null;
-
     #[ORM\Column(length: 36, unique: true)]
     private ?string $walletToken = null;
 
@@ -54,18 +51,6 @@ class LoyaltyCard
     public function getId(): ?int
     {
         return $this->id;
-    }
-
-    public function getQrCode(): ?string
-    {
-        return $this->qrCode;
-    }
-
-    public function setQrCode(string $qrCode): static
-    {
-        $this->qrCode = $qrCode;
-
-        return $this;
     }
 
     public function getWalletToken(): ?string

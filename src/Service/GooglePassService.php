@@ -52,8 +52,8 @@ class GooglePassService
             ],
             'barcode' => [
                 'type' => 'QR_CODE',
-                'value' => $card->getQrCode(),
-                'alternateText' => $card->getQrCode(),
+                'value' => $card->getWalletToken(),
+                'alternateText' => $card->getWalletToken(),
             ],
             'textModulesData' => [
                 [

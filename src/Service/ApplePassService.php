@@ -95,10 +95,10 @@ class ApplePassService
                 ],
             ],
             'barcode' => [
-                'message' => $card->getQrCode(),
+                'message' => $card->getWalletToken(),
                 'format' => 'PKBarcodeFormatQR',
                 'messageEncoding' => 'iso-8859-1',
-                'altText' => $card->getQrCode(),
+                'altText' => $card->getWalletToken(),
             ],
             'webServiceURL' => $this->baseUrl . '/public/wallet/apple/update/',
             'authenticationToken' => $card->getWalletToken(),

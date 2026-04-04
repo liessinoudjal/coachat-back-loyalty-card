@@ -25,7 +25,7 @@ class LoyaltyCardController extends AbstractController
 
         return [
             'id' => $card->getId(),
-            'qr_code' => $card->getQrCode(),
+            'wallet_token' => $walletToken,
             'current_value' => $card->getCurrentValue(),
             'target_value' => $card->getTargetValue(),
             'is_completed' => $card->isCompleted(),
@@ -41,6 +41,10 @@ class LoyaltyCardController extends AbstractController
                 'id' => $card->getCustomer()->getId(),
                 'name' => $card->getCustomer()->getName(),
                 'email' => $card->getCustomer()->getEmail(),
+            ] : null,
+            'merchant' => $card->getMerchant() ? [
+                'id' => $card->getMerchant()->getId(),
+                'company_name' => $card->getMerchant()->getCompanyName(),
             ] : null,
         ];
     }
@@ -72,15 +76,15 @@ class LoyaltyCardController extends AbstractController
         return new JsonResponse($data);
     }
 
-    #[Route('/api/loyalty_cards/by-qr/{qrCode}', name: 'get_loyalty_card_by_qr', methods: ['GET'])]
-    public function getByQr(string $qrCode): JsonResponse
+    #[Route('/api/loyalty_cards/by-token/{walletToken}', name: 'get_loyalty_card_by_token', methods: ['GET'])]
+    public function getByToken(string $walletToken): JsonResponse
     {
         $user = $this->getUser();
         if (!$user) {
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $card = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy(['qrCode' => $qrCode]);
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy(['walletToken' => $walletToken]);
         if (!$card || $card->getMerchant()->getUser() !== $user) {
             return new JsonResponse(['error' => 'Card not found'], 404);
         }
@@ -111,10 +115,7 @@ class LoyaltyCardController extends AbstractController
             return new JsonResponse(['error' => 'Program not found'], 404);
         }
 
-        $qrCode = uniqid('card_', true);
-
         $card = new LoyaltyCard();
-        $card->setQrCode($qrCode);
         $card->setCurrentValue(0);
         $card->setTargetValue($data['target_value'] ?? null);
         $card->setMerchant($merchant);

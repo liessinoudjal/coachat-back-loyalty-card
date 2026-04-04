@@ -454,11 +454,10 @@ Retourne toutes les cartes de fidélité d'un commerçant.
 [
   {
     "id": 1,
-    "qr_code": "card_123456789",
+    "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
     "current_value": 50,
     "target_value": 100,
     "is_completed": false,
-    "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
     "wallet_apple_url": "http://localhost:8000/public/wallet/apple/550e8400-e29b-41d4-a716-446655440000",
     "wallet_google_url": "http://localhost:8000/public/wallet/google/550e8400-e29b-41d4-a716-446655440000",
     "loyalty_program": {
@@ -470,17 +469,21 @@ Retourne toutes les cartes de fidélité d'un commerçant.
       "id": 1,
       "name": "John Doe",
       "email": "john@example.com"
+    },
+    "merchant": {
+      "id": 1,
+      "company_name": "Mon Commerce"
     }
   }
 ]
 ```
 
-### Get Loyalty Card by QR Code
+### Get Loyalty Card by Token
 ```
-GET /api/loyalty_cards/by-qr/{qr_code}
+GET /api/loyalty_cards/by-token/{walletToken}
 ```
 
-Retourne une carte de fidélité par son code QR.
+Retourne une carte de fidélité par son `wallet_token` (UUID v4).
 
 **Headers :**
 - `Authorization: Bearer <token>`
@@ -508,11 +511,10 @@ Crée une nouvelle carte de fidélité.
 ```json
 {
   "id": 1,
-  "qr_code": "generated_qr_code",
+  "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
   "current_value": 0,
   "target_value": 100,
   "is_completed": false,
-  "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
   "wallet_apple_url": "http://localhost:8000/public/wallet/apple/550e8400-e29b-41d4-a716-446655440000",
   "wallet_google_url": "http://localhost:8000/public/wallet/google/550e8400-e29b-41d4-a716-446655440000",
   "loyalty_program": {
@@ -524,6 +526,10 @@ Crée une nouvelle carte de fidélité.
     "id": 1,
     "name": "John Doe",
     "email": "john@example.com"
+  },
+  "merchant": {
+    "id": 1,
+    "company_name": "Mon Commerce"
   }
 }
 ```
@@ -551,11 +557,10 @@ Met à jour une carte de fidélité.
 ```json
 {
   "id": 1,
-  "qr_code": "card_123456789",
+  "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
   "current_value": 75,
   "target_value": 100,
   "is_completed": false,
-  "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
   "wallet_apple_url": "http://localhost:8000/public/wallet/apple/550e8400-e29b-41d4-a716-446655440000",
   "wallet_google_url": "http://localhost:8000/public/wallet/google/550e8400-e29b-41d4-a716-446655440000",
   "loyalty_program": {
@@ -567,6 +572,10 @@ Met à jour une carte de fidélité.
     "id": 1,
     "name": "John Doe",
     "email": "john@example.com"
+  },
+  "merchant": {
+    "id": 1,
+    "company_name": "Mon Commerce"
   }
 }
 ```
@@ -628,7 +637,7 @@ Retourne toutes les transactions d'un commerçant.
     "created_at": "2026-04-03 10:00:00",
     "loyalty_card": {
       "id": 1,
-      "qr_code": "card_123456789"
+      "wallet_token": "550e8400-e29b-41d4-a716-446655440000"
     }
   }
 ]

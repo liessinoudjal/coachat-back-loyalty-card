@@ -48,7 +48,7 @@ class TransactionController extends AbstractController
                 'created_at' => $transaction->getCreatedAt()->format('Y-m-d H:i:s'),
                 'loyalty_card' => [
                     'id' => $transaction->getLoyaltyCard()->getId(),
-                    'qr_code' => $transaction->getLoyaltyCard()->getQrCode(),
+                    'wallet_token' => $transaction->getLoyaltyCard()->getWalletToken(),
                 ],
             ];
         }
