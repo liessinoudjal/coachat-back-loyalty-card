@@ -580,6 +580,25 @@ Met à jour une carte de fidélité.
 }
 ```
 
+### Disable Loyalty Card
+```
+PATCH /api/loyalty_cards/{id}/disable
+```
+
+Désactive une carte de fidélité (soft-delete). La carte n'apparaîtra plus dans aucune liste ni recherche.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Body :** vide ou `{}`
+
+**Réponse :** `204 No Content`
+
+**Notes :**
+- La carte n'est pas supprimée physiquement en base de données
+- Le champ `visible` n'est pas exposé dans les réponses API
+- Seul le merchant propriétaire peut désactiver une carte
+
 ## Wallet (Apple & Google)
 
 Endpoints publics (sans JWT) permettant au customer d'ajouter sa carte à son wallet mobile.

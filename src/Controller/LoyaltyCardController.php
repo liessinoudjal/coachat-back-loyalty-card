@@ -29,7 +29,6 @@ class LoyaltyCardController extends AbstractController
             'current_value' => $card->getCurrentValue(),
             'target_value' => $card->getTargetValue(),
             'is_completed' => $card->isCompleted(),
-            'wallet_token' => $walletToken,
             'wallet_apple_url' => $this->appBaseUrl . '/public/wallet/apple/' . $walletToken,
             'wallet_google_url' => $this->appBaseUrl . '/public/wallet/google/' . $walletToken,
             'loyalty_program' => [
@@ -70,6 +69,9 @@ class LoyaltyCardController extends AbstractController
         $cards = $merchant->getLoyaltyCards();
         $data = [];
         foreach ($cards as $card) {
+            if (!$card->isVisible()) {
+                continue;
+            }
             $data[] = $this->formatCard($card);
         }
 
@@ -85,7 +87,7 @@ class LoyaltyCardController extends AbstractController
         }
 
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy(['walletToken' => $walletToken]);
-        if (!$card || $card->getMerchant()->getUser() !== $user) {
+        if (!$card || !$card->isVisible() || $card->getMerchant()->getUser() !== $user) {
             return new JsonResponse(['error' => 'Card not found'], 404);
         }
 
@@ -161,5 +163,24 @@ class LoyaltyCardController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse($this->formatCard($card));
+    }
+
+    #[Route('/api/loyalty_cards/{id}/disable', name: 'disable_loyalty_card', methods: ['PATCH'])]
+    public function disable(int $id): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
+        if (!$card || $card->getMerchant()->getUser() !== $user) {
+            return new JsonResponse(['error' => 'Card not found'], 404);
+        }
+
+        $card->setVisible(false);
+        $this->entityManager->flush();
+
+        return new JsonResponse(null, 204);
     }
 }

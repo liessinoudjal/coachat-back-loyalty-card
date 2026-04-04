@@ -28,6 +28,9 @@ class LoyaltyCard
     #[ORM\Column]
     private bool $isCompleted = false;
 
+    #[ORM\Column(options: ['default' => true])]
+    private bool $visible = true;
+
     #[ORM\ManyToOne(inversedBy: 'loyaltyCards')]
     #[ORM\JoinColumn(nullable: false)]
     private ?Merchant $merchant = null;
@@ -109,6 +112,18 @@ class LoyaltyCard
     public function setIsCompleted(bool $isCompleted): static
     {
         $this->isCompleted = $isCompleted;
+
+        return $this;
+    }
+
+    public function isVisible(): bool
+    {
+        return $this->visible;
+    }
+
+    public function setVisible(bool $visible): static
+    {
+        $this->visible = $visible;
 
         return $this;
     }
