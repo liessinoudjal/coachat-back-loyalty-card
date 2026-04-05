@@ -33,7 +33,8 @@ class PlanFixtures extends Fixture
                 'has_push_notifications' => false,
                 'has_advanced_stats' => false,
                 'is_active' => true,
-                'stripe_price_id' => null,
+                // 'stripe_price_id' => 'price_1TIpbqCOlIXBpVLDLspvPmb6', prod
+                'stripe_price_id' => 'price_1TIqZJCS4y2pRnsFL3MgJRgW',
             ],
             [
                 'slug' => 'premium',
@@ -45,7 +46,8 @@ class PlanFixtures extends Fixture
                 'has_push_notifications' => true,
                 'has_advanced_stats' => true,
                 'is_active' => true,
-                'stripe_price_id' => null,
+                // 'stripe_price_id' => 'price_1TIpeOCOlIXBpVLDVLjZ0RCd',prod
+                'stripe_price_id' => 'price_1TIqgfCS4y2pRnsFO6Xk8bdz',
             ],
         ];
 

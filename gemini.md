@@ -830,10 +830,15 @@ Endpoint qui reçoit les webhooks Stripe (à configurer dans Stripe Dashboard).
 **Signature :** Utilise `stripe-signature` header pour valider l'authenticité
 
 **Événements gérés :**
-- `checkout.session.completed` : Assigne le plan au merchant + statut `active`
-- `customer.subscription.updated` : Synchronisation du statut
-- `customer.subscription.deleted` : Retour au plan `free` + statut `canceled`
-- `invoice.payment_failed` : Statut `suspended`
+
+| Événement | Effet |
+|-----------|-------|
+| `checkout.session.completed` | Assigne le plan au merchant + statut `active` |
+| `customer.subscription.updated` | Synchronise le statut (`active` / `inactive`) |
+| `customer.subscription.deleted` | Retour au plan `free` + statut `canceled` |
+| `invoice.payment_failed` | Statut `suspended` |
+
+> À configurer dans **Stripe Dashboard → Développeurs → Webhooks → Ajouter un endpoint** en sélectionnant exactement ces 4 événements.
 
 **Réponse :**
 ```json
@@ -855,12 +860,32 @@ Endpoint qui reçoit les webhooks Stripe (à configurer dans Stripe Dashboard).
 9. Backend assigne le plan au merchant et met à jour `subscription_status` à `active`
 10. Frontend récupère le statut via `GET /api/merchant/me`
 
+### Permissions de la clé API Stripe
+
+Utiliser une **clé restreinte** (`rk_live_...` / `rk_test_...`) avec uniquement ces permissions :
+
+| Ressource | Permission |
+|-----------|------------|
+| Customers | Écriture |
+| Checkout Sessions | Écriture |
+| Subscriptions | Lecture |
+| Invoices | Lecture |
+| Customer portal | Écriture |
+| Prices | Lecture |
+| Events | Lecture |
+
+Tout le reste → **Aucune**. Ne jamais utiliser la clé secrète complète (`sk_...`) en production.
+
 ### Test Mode
 
-Utilisez les données de test Stripe :
-- **Card Number** : 4242 4242 4242 4242
-- **Expiration** : Date future (ex: 12/25)
-- **CVC** : Code à 3 chiffres quelconque
+Cartes de test Stripe :
+
+| Scénario | Numéro de carte | Date | CVC | ZIP |
+|----------|----------------|------|-----|-----|
+| **Paiement réussi** | `4242 4242 4242 4242` | N'importe quelle date future | N'importe lequel | N'importe lequel |
+| **Authentification 3D Secure** | `4000 0025 0000 3155` | idem | idem | idem |
+| **Carte refusée** | `4000 0000 0000 9995` | idem | idem | idem |
+
 - Configurez les Stripe Price IDs dans `Plan.stripePriceId` via fixtures ou BDD
 
 ## Customers (Clients)
