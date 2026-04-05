@@ -67,6 +67,61 @@ class SubscriptionController extends AbstractController
         }
     }
 
+    #[Route('/api/subscription/status', name: 'subscription_status', methods: ['GET'])]
+    public function getStatus(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+        $plan = $merchant->getPlan();
+
+        return new JsonResponse([
+            'subscription_status' => $merchant->getSubscriptionStatus(),
+            'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
+            'plan' => $plan ? [
+                'id' => $plan->getId(),
+                'slug' => $plan->getSlug(),
+                'name' => $plan->getName(),
+                'price_monthly' => $plan->getPriceMonthly(),
+            ] : null,
+        ]);
+    }
+
+    #[Route('/api/subscription/portal', name: 'subscription_portal', methods: ['POST'])]
+    public function createPortalSession(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+        $stripeCustomerId = $merchant->getStripeCustomerId();
+        if (!$stripeCustomerId) {
+            return new JsonResponse(['error' => 'No active Stripe subscription'], 400);
+        }
+        try {
+            Stripe::setApiKey($_ENV['STRIPE_SECRET_KEY']);
+            $data = json_decode($request->getContent(), true);
+            $returnUrl = $data['return_url'] ?? ($_ENV['STRIPE_SUCCESS_URL'] ?? 'http://localhost:5173/subscription');
+            $portalSession = \Stripe\BillingPortal\Session::create([
+                'customer' => $stripeCustomerId,
+                'return_url' => $returnUrl,
+            ]);
+
+            return new JsonResponse(['url' => $portalSession->url]);
+        } catch (\Exception $e) {
+            return new JsonResponse(['error' => 'Failed to create portal session: ' . $e->getMessage()], 500);
+        }
+    }
+
     #[Route('/api/subscription/webhook', name: 'handle_stripe_webhook', methods: ['POST'])]
     public function handleWebhook(Request $request): JsonResponse
     {
