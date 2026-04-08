@@ -45,9 +45,13 @@ class LoyaltyCard
     #[ORM\OneToMany(targetEntity: Transaction::class, mappedBy: 'loyaltyCard', orphanRemoval: true)]
     private Collection $transactions;
 
+    #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'loyaltyCard', orphanRemoval: true)]
+    private Collection $rewards;
+
     public function __construct()
     {
         $this->transactions = new ArrayCollection();
+        $this->rewards = new ArrayCollection();
         $this->walletToken = Uuid::v4()->toRfc4122();
     }
 
@@ -188,6 +192,35 @@ class LoyaltyCard
             // set the owning side to null (unless already changed)
             if ($transaction->getLoyaltyCard() === $this) {
                 $transaction->setLoyaltyCard(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Reward>
+     */
+    public function getRewards(): Collection
+    {
+        return $this->rewards;
+    }
+
+    public function addReward(Reward $reward): static
+    {
+        if (!$this->rewards->contains($reward)) {
+            $this->rewards->add($reward);
+            $reward->setLoyaltyCard($this);
+        }
+
+        return $this;
+    }
+
+    public function removeReward(Reward $reward): static
+    {
+        if ($this->rewards->removeElement($reward)) {
+            if ($reward->getLoyaltyCard() === $this) {
+                $reward->setLoyaltyCard(null);
             }
         }
 

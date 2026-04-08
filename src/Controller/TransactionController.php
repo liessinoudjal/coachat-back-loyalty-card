@@ -5,8 +5,10 @@ namespace App\Controller;
 use App\Entity\Transaction;
 use App\Entity\Merchant;
 use App\Entity\LoyaltyCard;
+use App\Enum\LoyaltyProgramType;
 use App\Service\AppleWalletPushService;
 use App\Service\GoogleWalletSyncService;
+use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -21,6 +23,7 @@ class TransactionController extends AbstractController
         EntityManagerInterface $entityManager,
         private readonly AppleWalletPushService $appleWalletPushService,
         private readonly GoogleWalletSyncService $googleWalletSyncService,
+        private readonly RewardService $rewardService,
     ) {
         $this->entityManager = $entityManager;
     }
@@ -90,11 +93,29 @@ class TransactionController extends AbstractController
         $transaction->setMerchant($merchant);
         $transaction->setLoyaltyCard($card);
 
-        // Update card points
-        $card->setPoints($card->getPoints() + $data['points_earned'] - ($data['points_redeemed'] ?? 0));
+        $previouslyCompleted = $card->isCompleted();
+        $newValue = max(0, (int) $card->getPoints() + (int) $data['points_earned'] - (int) ($data['points_redeemed'] ?? 0));
+        $card->setPoints($newValue);
+
+        $program = $card->getLoyaltyProgram();
+        $targetValue = $card->getTargetValue();
+        if ($targetValue === null && $program !== null) {
+            $targetValue = $program->getType() === LoyaltyProgramType::POINTS
+                ? $program->getPointsTarget()
+                : $program->getStampTarget();
+        }
+
+        if ($targetValue !== null && $targetValue > 0 && $newValue >= $targetValue) {
+            $card->setIsCompleted(true);
+        }
 
         $this->entityManager->persist($transaction);
         $this->entityManager->flush();
+
+        if (!$previouslyCompleted && $card->isCompleted()) {
+            $this->rewardService->createRewardFromCompletion($card, $transaction->getId());
+            $this->entityManager->flush();
+        }
 
         $this->appleWalletPushService->notifyUpdate($card->getWalletToken());
         $this->googleWalletSyncService->syncCard($card);

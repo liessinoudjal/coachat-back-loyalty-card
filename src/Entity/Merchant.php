@@ -47,6 +47,9 @@ class Merchant
     #[ORM\OneToMany(targetEntity: Transaction::class, mappedBy: 'merchant', orphanRemoval: true)]
     private Collection $transactions;
 
+    #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'merchant', orphanRemoval: true)]
+    private Collection $rewards;
+
     #[ORM\ManyToOne(targetEntity: Plan::class)]
     #[ORM\JoinColumn(nullable: true, referencedColumnName: 'id', columnDefinition: 'VARCHAR(36) DEFAULT NULL')]
     private ?Plan $plan = null;
@@ -57,6 +60,7 @@ class Merchant
         $this->loyaltyPrograms = new ArrayCollection();
         $this->loyaltyCards = new ArrayCollection();
         $this->transactions = new ArrayCollection();
+        $this->rewards = new ArrayCollection();
     }
 
     public function getId(): ?Uuid
@@ -232,6 +236,35 @@ class Merchant
             // set the owning side to null (unless already changed)
             if ($transaction->getMerchant() === $this) {
                 $transaction->setMerchant(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Reward>
+     */
+    public function getRewards(): Collection
+    {
+        return $this->rewards;
+    }
+
+    public function addReward(Reward $reward): static
+    {
+        if (!$this->rewards->contains($reward)) {
+            $this->rewards->add($reward);
+            $reward->setMerchant($this);
+        }
+
+        return $this;
+    }
+
+    public function removeReward(Reward $reward): static
+    {
+        if ($this->rewards->removeElement($reward)) {
+            if ($reward->getMerchant() === $this) {
+                $reward->setMerchant(null);
             }
         }
 

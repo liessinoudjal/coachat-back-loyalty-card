@@ -51,9 +51,13 @@ class LoyaltyProgram
     #[ORM\OneToMany(targetEntity: LoyaltyCard::class, mappedBy: 'loyaltyProgram', orphanRemoval: true)]
     private Collection $loyaltyCards;
 
+    #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'loyaltyProgram')]
+    private Collection $rewards;
+
     public function __construct()
     {
         $this->loyaltyCards = new ArrayCollection();
+        $this->rewards = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -193,6 +197,35 @@ class LoyaltyProgram
             // set the owning side to null (unless already changed)
             if ($loyaltyCard->getLoyaltyProgram() === $this) {
                 $loyaltyCard->setLoyaltyProgram(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Reward>
+     */
+    public function getRewards(): Collection
+    {
+        return $this->rewards;
+    }
+
+    public function addReward(Reward $reward): static
+    {
+        if (!$this->rewards->contains($reward)) {
+            $this->rewards->add($reward);
+            $reward->setLoyaltyProgram($this);
+        }
+
+        return $this;
+    }
+
+    public function removeReward(Reward $reward): static
+    {
+        if ($this->rewards->removeElement($reward)) {
+            if ($reward->getLoyaltyProgram() === $this) {
+                $reward->setLoyaltyProgram(null);
             }
         }
 

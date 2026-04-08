@@ -27,9 +27,13 @@ class Customer
     #[ORM\OneToMany(targetEntity: LoyaltyCard::class, mappedBy: 'customer')]
     private Collection $loyaltyCards;
 
+    #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'customer', orphanRemoval: true)]
+    private Collection $rewards;
+
     public function __construct()
     {
         $this->loyaltyCards = new ArrayCollection();
+        $this->rewards = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -97,6 +101,35 @@ class Customer
             // set the owning side to null (unless already changed)
             if ($loyaltyCard->getCustomer() === $this) {
                 $loyaltyCard->setCustomer(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Reward>
+     */
+    public function getRewards(): Collection
+    {
+        return $this->rewards;
+    }
+
+    public function addReward(Reward $reward): static
+    {
+        if (!$this->rewards->contains($reward)) {
+            $this->rewards->add($reward);
+            $reward->setCustomer($this);
+        }
+
+        return $this;
+    }
+
+    public function removeReward(Reward $reward): static
+    {
+        if ($this->rewards->removeElement($reward)) {
+            if ($reward->getCustomer() === $this) {
+                $reward->setCustomer(null);
             }
         }
 

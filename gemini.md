@@ -2,9 +2,14 @@
 
 ## Overview
 
-Cette API Symfony fournit un système complet de gestion de cartes de fidélité pour les commerçants. Elle inclut l'authentification via Google OAuth2, la gestion des commerçants, programmes de fidélité, cartes de fidélité, transactions et clients.
+Cette API Symfony fournit un système complet de gestion de cartes de fidélité pour les commerçants. Elle inclut :
 
-L'API utilise JWT pour l'authentification et API Platform pour la gestion des ressources.
+- Authentification via Google OAuth2 + JWT
+- Gestion des commerçants, programmes de fidélité, cartes, transactions, clients
+- Rewards (récompenses) réclamables via QR code
+- **Customer Portal** : accès temporaire sécurisé pour les clients non authentifiés JWT, via `portal_token` court TTL issu d'un wallet token
+
+L'API utilise JWT pour l'authentification des marchands et API Platform pour la gestion des ressources.
 
 ## Base URL
 
@@ -697,8 +702,10 @@ Par défaut `GOOGLE_WALLET_ENABLED=false`.
 
 **Flow lors d'une transaction :**
 1. Transaction créée et sauvegardée en BDD
-2. `AppleWalletPushService::notifyUpdate()` → envoie une notification APNs à chaque appareil enregistré → iOS re-télécharge le `.pkpass`
-3. `GoogleWalletSyncService::syncCard()` → obtient un token OAuth2 via service account → `PATCH https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/{id}` avec la nouvelle valeur
+2. Recalcul de la progression de la carte (`current_value`, `is_completed`)
+3. Si la carte passe de `is_completed=false` à `is_completed=true`, création idempotente d'une `Reward`
+4. `AppleWalletPushService::notifyUpdate()` → envoie une notification APNs à chaque appareil enregistré → iOS re-télécharge le `.pkpass`
+5. `GoogleWalletSyncService::syncCard()` → obtient un token OAuth2 via service account → `PATCH https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/{id}` avec la nouvelle valeur
 
 ---
 
@@ -755,6 +762,129 @@ Crée une nouvelle transaction et met à jour les points de la carte.
   "notes": "Coffee purchase"
 }
 ```
+
+---
+
+## Rewards (Récompenses)
+
+Cycle de vie d'une reward : `PENDING` → `CLAIMED` (ou `CANCELLED` / `EXPIRED`).
+
+### Shape Reward
+
+```json
+{
+  "id": "uuid",
+  "loyalty_card_id": 1,
+  "merchant_id": "uuid-merchant",
+  "customer_id": 42,
+  "wallet_token": "wallet-token",
+  "reward_description": "1 café offert",
+  "status": "PENDING",
+  "generated_at": "2026-04-08T10:15:00+00:00",
+  "claimed_at": null,
+  "claim_qr_token": "token-unique",
+  "customer": {
+    "id": 42,
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  },
+  "merchant": {
+    "id": "uuid-merchant",
+    "company_name": "Coffee Shop"
+  },
+  "loyalty_program": {
+    "id": 7,
+    "name": "Coffee Rewards",
+    "type": "STAMP",
+    "reward_description": "1 café offert"
+  }
+}
+```
+
+### Get Rewards
+
+```http
+GET /api/rewards?merchant={id}&customer_email={email}&wallet_token={token}&status=PENDING&page=1&itemsPerPage=20
+```
+
+Filtres supportés :
+- `merchant`
+- `customer_email`
+- `wallet_token`
+- `status` (`PENDING`, `CLAIMED`, `CANCELLED`, `EXPIRED`)
+
+Notes sécurité :
+- Si authentifié merchant : retour limité au merchant connecté.
+- En lookup public (`customer_email`/`wallet_token`) : payload réduit et rate-limité.
+
+### Generate From Completion (idempotent)
+
+```http
+POST /api/rewards/from-completion
+Authorization: Bearer <token>
+```
+
+Body :
+
+```json
+{
+  "loyalty_card_id": 1,
+  "transaction_id": 123
+}
+```
+
+Comportement :
+- Vérifie que la carte est complétée.
+- Crée la reward si absente.
+- Retourne la reward existante sinon (idempotence).
+
+### Claim By QR
+
+```http
+POST /api/rewards/claim-by-qr
+Authorization: Bearer <token>
+```
+
+Body :
+
+```json
+{
+  "qr_token": "lacarte-reward:TOKEN_OU_TOKEN_BRUT"
+}
+```
+
+Comportement :
+- Parse `lacarte-reward:TOKEN` ou token brut.
+- Trouve la reward par `claim_qr_token`.
+- Autorise uniquement `PENDING`.
+- Passe à `CLAIMED`, renseigne `claimed_at` et l'acteur.
+- Si déjà `CLAIMED` : `409`.
+
+### Admin Status Update
+
+```http
+PATCH /api/rewards/{id}
+Authorization: Bearer <token>
+```
+
+Body :
+
+```json
+{
+  "status": "CANCELLED",
+  "cancel_reason": "fraud suspected"
+}
+```
+
+Statuts autorisés en PATCH : `CANCELLED`, `EXPIRED`.
+
+### Audit
+
+Toutes les transitions de statut sont journalisées (`reward_status_log`) avec :
+- statut source / statut cible
+- horodatage
+- acteur merchant/user
+- raison / métadonnées éventuelles
 
 ## Subscriptions (Abonnements)
 
@@ -851,6 +981,117 @@ Endpoint qui reçoit les webhooks Stripe (à configurer dans Stripe Dashboard).
 
 1. Frontend appelle `GET /api/plans` pour afficher les plans disponibles
 2. Utilisateur choisit un plan → frontend envoie `POST /api/subscription/checkout` avec `plan_slug`
+
+---
+
+## Customer Portal (Portail Client Public)
+
+Accès temporaire et sécurisé pour un client non authentifié JWT. Basé sur un `portal_token` opaque, court TTL, hash HMAC-SHA256 en base.
+
+### Sécurité
+- Token opaque : `pt_live_` + 64 hex (256 bits d'entropie, `random_bytes(32)`)
+- Stockage : HMAC-SHA256(token, APP_SECRET) — jamais en clair
+- TTL : 15 min, refreshable jusqu'à 24h cumulées (fenêtre glissante)
+- Rate limiting : 10 req/min bootstrap (IP), 60 req/min overview (token hash)
+- Aucun accès par `customer_id` ou email seul côté public
+
+### Entité CustomerPortalSession
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `id` | UUID v4 | PK |
+| `customer` | ManyToOne Customer | Customer lié |
+| `token_hash` | VARCHAR(64) UNIQUE | HMAC-SHA256 du token brut |
+| `issued_from_wallet_token` | VARCHAR(36) | Wallet token source (audit) |
+| `issued_at` | datetime_immutable | Émission |
+| `original_issued_at` | datetime_immutable nullable | Préservé sur refresh pour fenêtre 24h |
+| `expires_at` | datetime_immutable | Expiration |
+| `revoked_at` | datetime_immutable nullable | Révocation explicite |
+| `last_used_at` | datetime_immutable nullable | Dernière activité |
+| `ip` | VARCHAR(45) nullable | IPv4/v6 pour audit |
+| `user_agent` | VARCHAR(512) nullable | UA pour audit |
+| `scope` | VARCHAR(255) | `cards:read rewards:read` |
+
+### Endpoints
+
+#### POST /api/public/customer-portal/bootstrap
+Émet un portal_token depuis un wallet_token valide.
+
+**Body :**
+```json
+{ "wallet_token": "wallet-token-source" }
+```
+
+**Réponse 200 :**
+```json
+{
+  "portal_token": "pt_live_xxxxxxxxx",
+  "token_type": "Bearer",
+  "expires_at": "2026-04-08T12:30:00+00:00",
+  "customer": { "id": 42, "name": "Jane Doe" }
+}
+```
+
+**Erreurs :** 400 wallet_token manquant, 404 wallet_token inconnu, 410 carte sans customer, 429 rate limit
+
+---
+
+#### GET /api/public/customer-portal/overview
+Vue consolidée cartes + rewards du customer. Nécessite `Authorization: Bearer <portal_token>`.
+
+**Query params :** `include=cards,rewards` `status=PENDING` `page=1` `itemsPerPage=20`
+
+**Réponse 200 :**
+```json
+{
+  "customer": { "id": 42, "name": "Jane Doe" },
+  "cards": [...],
+  "rewards": [...],
+  "meta": { "cards_count": 3, "rewards_count": 2 }
+}
+```
+
+**Erreurs :** 401 token invalide/révoqué/expiré, 429 rate limit
+
+---
+
+#### POST /api/public/customer-portal/refresh
+Rotation de token : révoque l'ancien et en émet un nouveau. Nécessite `Authorization: Bearer <portal_token>`.
+
+**Réponse 200 :**
+```json
+{ "portal_token": "pt_live_new_xxxxx", "token_type": "Bearer", "expires_at": "..." }
+```
+
+**Erreurs :** 401 token invalide, 403 fenêtre 24h dépassée
+
+---
+
+#### POST /api/public/customer-portal/revoke
+Logout public — invalide la session courante. Réponse 204 No Content.
+
+---
+
+### Codes d'erreur JSON (format standard)
+
+| Code | HTTP | Signification |
+|------|------|---------------|
+| `PORTAL_TOKEN_INVALID` | 401 | Token absent, malformé ou inconnu |
+| `PORTAL_TOKEN_EXPIRED` | 401 | Session expirée |
+| `PORTAL_TOKEN_REVOKED` | 401 | Session révoquée explicitement |
+| `CLAIM_WALLET_TOKEN_INVALID` | 404/410 | Wallet token inconnu ou carte sans customer |
+| `RATE_LIMITED` | 429 | Trop de requêtes |
+
+### Flow côté Front
+
+1. Depuis la page claim (wallet_token connu) → `POST /bootstrap`
+2. Stocker `portal_token` en `sessionStorage` (pas `localStorage`)
+3. `GET /overview` pour afficher cartes et rewards
+4. Si 401 avec code `PORTAL_TOKEN_EXPIRED` ou `PORTAL_TOKEN_REVOKED` → forcer retour au flux claim
+5. `POST /refresh` avant expiration si session prolongée nécessaire
+
+### Migration
+Table `customer_portal_session` créée dans `Version20260409000001`.
 3. Backend résout le Stripe Price ID depuis la BDD (non exposé)
 4. Backend crée/récupère le customer Stripe et crée une session Checkout
 5. Frontend redirige vers `checkoutUrl`
