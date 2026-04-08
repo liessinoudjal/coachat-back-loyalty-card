@@ -183,4 +183,24 @@ class LoyaltyCardController extends AbstractController
 
         return new JsonResponse(null, 204);
     }
+
+    #[Route('/api/loyalty_cards/{id}', name: 'delete_loyalty_card', methods: ['DELETE'])]
+    public function delete(int $id): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
+        if (!$card || $card->getMerchant()->getUser() !== $user) {
+            return new JsonResponse(['error' => 'Card not found'], 404);
+        }
+
+        // Keep historical transactions/rewards and hide the card from standard listings.
+        $card->setVisible(false);
+        $this->entityManager->flush();
+
+        return new JsonResponse(null, 204);
+    }
 }
