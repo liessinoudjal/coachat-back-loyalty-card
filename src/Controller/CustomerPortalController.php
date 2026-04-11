@@ -13,6 +13,7 @@ use App\Service\CustomerPortalService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -64,7 +65,7 @@ class CustomerPortalController extends AbstractController
 
         $customer = $session->getCustomer();
 
-        return new JsonResponse([
+        $response = new JsonResponse([
             'portal_token' => $rawToken,
             'token_type'   => 'Bearer',
             'expires_at'   => $session->getExpiresAt()->format(\DateTimeInterface::ATOM),
@@ -73,6 +74,8 @@ class CustomerPortalController extends AbstractController
                 'name' => $customer->getName(),
             ],
         ]);
+
+        return $this->withPortalTokenCookie($response, $rawToken, $session->getExpiresAt(), $request);
     }
 
     /**
@@ -149,11 +152,13 @@ class CustomerPortalController extends AbstractController
             return $this->portalError($e->getPortalCode(), $e->getMessage(), $e->getHttpStatus());
         }
 
-        return new JsonResponse([
+        $response = new JsonResponse([
             'portal_token' => $rawToken,
             'token_type'   => 'Bearer',
             'expires_at'   => $newSession->getExpiresAt()->format(\DateTimeInterface::ATOM),
         ]);
+
+        return $this->withPortalTokenCookie($response, $rawToken, $newSession->getExpiresAt(), $request);
     }
 
     /**
@@ -171,7 +176,9 @@ class CustomerPortalController extends AbstractController
 
         $this->portalService->revoke($session);
 
-        return new Response(null, Response::HTTP_NO_CONTENT);
+        $response = new Response(null, Response::HTTP_NO_CONTENT);
+
+        return $this->clearPortalTokenCookie($response, $request);
     }
 
     // -------------------------------------------------------------------------
@@ -185,17 +192,49 @@ class CustomerPortalController extends AbstractController
      */
     private function resolvePortalSession(Request $request): \App\Entity\CustomerPortalSession
     {
-        $authHeader = $request->headers->get('Authorization', '');
-        if (!str_starts_with($authHeader, 'Bearer ')) {
-            throw new PortalTokenException('PORTAL_TOKEN_INVALID', 401, 'Header Authorization manquant ou invalide.');
-        }
-
-        $rawToken = substr($authHeader, 7);
-        if ($rawToken === '') {
-            throw new PortalTokenException('PORTAL_TOKEN_INVALID', 401, 'Token portal vide.');
-        }
+        $rawToken = $this->portalService->resolveRawTokenFromRequest($request);
 
         return $this->portalService->validateToken($rawToken);
+    }
+
+    private function withPortalTokenCookie(JsonResponse $response, string $rawToken, \DateTimeImmutable $expiresAt, Request $request): JsonResponse
+    {
+        $isSecure = $request->isSecure();
+        $sameSite = $isSecure ? Cookie::SAMESITE_NONE : Cookie::SAMESITE_LAX;
+
+        $response->headers->setCookie(Cookie::create(
+            CustomerPortalService::PORTAL_COOKIE_NAME,
+            $rawToken,
+            $expiresAt,
+            '/api/public/customer-portal',
+            null,
+            $isSecure,
+            true,
+            false,
+            $sameSite,
+        ));
+
+        return $response;
+    }
+
+    private function clearPortalTokenCookie(Response $response, Request $request): Response
+    {
+        $isSecure = $request->isSecure();
+        $sameSite = $isSecure ? Cookie::SAMESITE_NONE : Cookie::SAMESITE_LAX;
+
+        $response->headers->setCookie(Cookie::create(
+            CustomerPortalService::PORTAL_COOKIE_NAME,
+            '',
+            new \DateTimeImmutable('-1 hour'),
+            '/api/public/customer-portal',
+            null,
+            $isSecure,
+            true,
+            false,
+            $sameSite,
+        ));
+
+        return $response;
     }
 
     /** Build paginated card list for a customer. */

@@ -12,9 +12,12 @@ use App\Repository\CustomerPortalSessionRepository;
 use App\Repository\LoyaltyCardRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\HttpFoundation\Request;
 
 class CustomerPortalService
 {
+    public const PORTAL_COOKIE_NAME = 'customer_portal_token';
+
     /** Short-lived access token: 15 minutes. */
     private const TOKEN_TTL_SECONDS = 900;
 
@@ -79,6 +82,14 @@ class CustomerPortalService
      */
     public function validateToken(string $rawToken): CustomerPortalSession
     {
+        if (!$this->isPortalToken($rawToken)) {
+            throw new PortalTokenException(
+                'PORTAL_TOKEN_INVALID',
+                401,
+                'Format du token portal invalide.',
+            );
+        }
+
         $hash = $this->hashToken($rawToken);
 
         $session = $this->sessionRepository->findByTokenHash($hash);
@@ -111,6 +122,54 @@ class CustomerPortalService
         $this->em->flush();
 
         return $session;
+    }
+
+    /**
+     * Resolve a portal token from request context.
+     * Priority:
+     * 1) Authorization: Bearer <portal_token>
+     * 2) HttpOnly cookie customer_portal_token
+     *
+     * If Authorization is present but does not contain a portal token,
+     * fallback to cookie is attempted to avoid collisions with merchant JWT interceptors.
+     *
+     * @throws PortalTokenException 401 if no valid portal token is found
+     */
+    public function resolveRawTokenFromRequest(Request $request): string
+    {
+        $authHeader = trim((string) $request->headers->get('Authorization', ''));
+        $bearerToken = null;
+
+        if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches) === 1) {
+            $bearerToken = trim((string) ($matches[1] ?? ''));
+            if ($bearerToken !== '' && $this->isPortalToken($bearerToken)) {
+                return $bearerToken;
+            }
+        }
+
+        $cookieToken = trim((string) $request->cookies->get(self::PORTAL_COOKIE_NAME, ''));
+        if ($cookieToken !== '' && $this->isPortalToken($cookieToken)) {
+            return $cookieToken;
+        }
+
+        if ($bearerToken !== null) {
+            throw new PortalTokenException(
+                'PORTAL_TOKEN_INVALID',
+                401,
+                'Token portal absent: le header Authorization courant ne contient pas un token portal valide.',
+            );
+        }
+
+        throw new PortalTokenException(
+            'PORTAL_TOKEN_INVALID',
+            401,
+            'Token portal absent: fournir Authorization Bearer (portal_token) ou cookie portal.',
+        );
+    }
+
+    public function isPortalToken(string $token): bool
+    {
+        return preg_match('/^' . preg_quote(self::TOKEN_PREFIX, '/') . '[a-f0-9]{64}$/i', $token) === 1;
     }
 
     /**

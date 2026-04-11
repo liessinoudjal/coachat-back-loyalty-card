@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^php bin/phpunit tests/Service/CustomerPortalServiceTest\\.php tests/Service/RewardServiceTest\\.php tests/Controller/CustomerPortalControllerTest\\.php$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

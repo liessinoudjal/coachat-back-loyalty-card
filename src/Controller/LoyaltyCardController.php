@@ -81,17 +81,47 @@ class LoyaltyCardController extends AbstractController
     #[Route('/api/loyalty_cards/by-token/{walletToken}', name: 'get_loyalty_card_by_token', methods: ['GET'])]
     public function getByToken(string $walletToken): JsonResponse
     {
-        $user = $this->getUser();
-        if (!$user) {
-            return new JsonResponse(['error' => 'Unauthorized'], 401);
-        }
-
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy(['walletToken' => $walletToken]);
-        if (!$card || !$card->isVisible() || $card->getMerchant()->getUser() !== $user) {
+        if (!$card || !$card->isVisible()) {
             return new JsonResponse(['error' => 'Card not found'], 404);
         }
 
-        return new JsonResponse($this->formatCard($card));
+        $user = $this->getUser();
+        if ($user && $card->getMerchant()->getUser() === $user) {
+            return new JsonResponse($this->formatCard($card));
+        }
+
+        return new JsonResponse($this->formatPublicCard($card));
+
+    }
+
+    private function formatPublicCard(LoyaltyCard $card): array
+    {
+        $walletToken = $card->getWalletToken();
+
+        return [
+            'id' => $card->getId(),
+            'wallet_token' => $walletToken,
+            'current_value' => $card->getCurrentValue(),
+            'target_value' => $card->getTargetValue(),
+            'is_completed' => $card->isCompleted(),
+            'wallet_apple_url' => $this->appBaseUrl . '/public/wallet/apple/' . $walletToken,
+            'wallet_google_url' => $this->appBaseUrl . '/public/wallet/google/' . $walletToken,
+            'loyalty_program' => [
+                'id' => $card->getLoyaltyProgram()->getId(),
+                'name' => $card->getLoyaltyProgram()->getName(),
+                'type' => $card->getLoyaltyProgram()->getType()->value,
+            ],
+            'customer' => $card->getCustomer() ? [
+                'id' => $card->getCustomer()->getId(),
+                'name' => $card->getCustomer()->getName(),
+            ] : null,
+            'merchant' => $card->getMerchant() ? [
+                'id' => $card->getMerchant()->getId(),
+                'company_name' => $card->getMerchant()->getCompanyName(),
+            ] : null,
+        ];
+
     }
 
     #[Route('/api/loyalty_cards', name: 'create_loyalty_card', methods: ['POST'])]

@@ -491,7 +491,11 @@ GET /api/loyalty_cards/by-token/{walletToken}
 Retourne une carte de fidélité par son `wallet_token` (UUID v4).
 
 **Headers :**
-- `Authorization: Bearer <token>`
+- Aucun header d'authentification requis (endpoint public).
+
+**Comportement d'accès :**
+- Utilisateur non connecté : accès autorisé avec payload public (pas d'email customer).
+- Merchant propriétaire connecté : payload complet.
 
 ### Create Loyalty Card
 ```
