@@ -152,6 +152,36 @@ class RewardController extends AbstractController
         return new JsonResponse($this->formatReward($reward));
     }
 
+    #[Route('/api/rewards/by-card/{cardId}', name: 'reward_by_card', methods: ['GET'])]
+    public function getByCardId(int $cardId): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $merchant = $user->getMerchant();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($cardId);
+        if (!$card instanceof LoyaltyCard || $card->getMerchant() !== $merchant) {
+            return new JsonResponse(['error' => 'Card not found'], 404);
+        }
+
+        $reward = $this->entityManager->getRepository(Reward::class)->findOneBy(
+            ['loyaltyCard' => $card, 'merchant' => $merchant],
+            ['generatedAt' => 'DESC'],
+        );
+
+        if (!$reward instanceof Reward) {
+            return new JsonResponse(['error' => 'Reward not found'], 404);
+        }
+
+        return new JsonResponse($this->formatReward($reward));
+    }
+
     #[Route('/api/rewards/claim-by-qr', name: 'reward_claim_by_qr', methods: ['POST'])]
     public function claimByQr(Request $request): JsonResponse
     {

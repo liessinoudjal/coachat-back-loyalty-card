@@ -842,6 +842,59 @@ Comportement :
 - Crée la reward si absente.
 - Retourne la reward existante sinon (idempotence).
 
+### Get Reward By Loyalty Card ID
+
+```http
+GET /api/rewards/by-card/{cardId}
+Authorization: Bearer <token>
+```
+
+Comportement :
+- Nécessite un JWT merchant valide.
+- Vérifie que la carte appartient bien au merchant authentifié.
+- Retourne la reward la plus récente liée à cette carte.
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "uuid-reward",
+  "loyalty_card_id": 12,
+  "merchant_id": "uuid-merchant",
+  "customer_id": 42,
+  "wallet_token": "550e8400-e29b-41d4-a716-446655440000",
+  "reward_description": "1 café offert",
+  "status": "PENDING",
+  "generated_at": "2026-04-12T10:15:00+00:00",
+  "claimed_at": null,
+  "claim_qr_token": "token-unique",
+  "customer": {
+    "id": 42,
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  },
+  "merchant": {
+    "id": "uuid-merchant",
+    "company_name": "Coffee Shop"
+  },
+  "loyalty_program": {
+    "id": 7,
+    "name": "Coffee Rewards",
+    "type": "STAMP",
+    "reward_description": "1 café offert"
+  }
+}
+```
+
+**Notes front :**
+- `claimed_at` est `null` tant que la reward n'est pas claim.
+- `status` est une enum parmi `PENDING`, `CLAIMED`, `CANCELLED`, `EXPIRED`.
+- `claim_qr_token` est présent dans ce endpoint merchant.
+- Réponses possibles :
+  - `200` reward trouvée
+  - `401` non authentifié
+  - `404` merchant/carte/reward introuvable ou carte hors périmètre du merchant
+
 ### Claim By QR
 
 ```http
