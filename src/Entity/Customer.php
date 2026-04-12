@@ -24,6 +24,10 @@ class Customer
     #[ORM\Column(length: 20, nullable: true)]
     private ?string $phone = null;
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true)]
+    private ?Merchant $merchant = null;
+
     #[ORM\OneToMany(targetEntity: LoyaltyCard::class, mappedBy: 'customer')]
     private Collection $loyaltyCards;
 
@@ -73,6 +77,18 @@ class Customer
     public function setPhone(?string $phone): static
     {
         $this->phone = $phone;
+
+        return $this;
+    }
+
+    public function getMerchant(): ?Merchant
+    {
+        return $this->merchant;
+    }
+
+    public function setMerchant(?Merchant $merchant): static
+    {
+        $this->merchant = $merchant;
 
         return $this;
     }

@@ -13,6 +13,8 @@ use Symfony\Component\Uid\Uuid;
 
 class MerchantController extends AbstractController
 {
+    private const MAX_LOGO_SIZE_BYTES = 5242880;
+
     private $entityManager;
     private $planRepository;
 
@@ -54,16 +56,24 @@ class MerchantController extends AbstractController
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
 
-        return new JsonResponse([
+        return new JsonResponse($this->formatMerchant($merchant));
+    }
+
+    private function formatMerchant(Merchant $merchant): array
+    {
+        return [
             'id' => $merchant->getId(),
             'company_name' => $merchant->getCompanyName(),
             'email' => $merchant->getEmail(),
+            'phone' => $merchant->getPhone(),
+            'address' => $merchant->getAddress(),
+            'logo_url' => $merchant->getLogoUrl(),
             'stripe_customer_id' => $merchant->getStripeCustomerId(),
             'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
             'subscription_status' => $merchant->getSubscriptionStatus(),
             'active_loyalty_program_count' => $merchant->getActiveLoyaltyProgramCount(),
             'plan' => $this->formatPlan($merchant->getPlan()),
-        ]);
+        ];
     }
 
     #[Route('/api/merchants/me/plan-usage', name: 'merchant_plan_usage', methods: ['GET'])]
@@ -112,10 +122,22 @@ class MerchantController extends AbstractController
         if (!isset($data['company_name'])) {
             return new JsonResponse(['error' => 'company_name required'], 400);
         }
+        if (!is_string($data['company_name']) || trim($data['company_name']) === '') {
+            return new JsonResponse(['error' => 'company_name must be a non-empty string'], 400);
+        }
+        if (array_key_exists('phone', $data) && $data['phone'] !== null && !is_string($data['phone'])) {
+            return new JsonResponse(['error' => 'phone must be a string or null'], 400);
+        }
+        if (array_key_exists('address', $data) && $data['address'] !== null && !is_string($data['address'])) {
+            return new JsonResponse(['error' => 'address must be a string or null'], 400);
+        }
 
         $merchant = new Merchant();
-        $merchant->setCompanyName($data['company_name']);
+        $merchant->setCompanyName(trim($data['company_name']));
         $merchant->setEmail($data['email'] ?? $user->getEmail());
+        $merchant->setPhone($data['phone'] ?? null);
+        $merchant->setAddress($data['address'] ?? null);
+        $merchant->setLogoUrl(null);
         $merchant->setSubscriptionStatus($data['subscription_status'] ?? 'trial');
 
         if (isset($data['trial_ends_at'])) {
@@ -146,14 +168,7 @@ class MerchantController extends AbstractController
         $this->entityManager->persist($merchant);
         $this->entityManager->flush();
 
-        return new JsonResponse([
-            'id' => $merchant->getId(),
-            'company_name' => $merchant->getCompanyName(),
-            'email' => $merchant->getEmail(),
-            'subscription_status' => $merchant->getSubscriptionStatus(),
-            'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
-            'plan' => $this->formatPlan($merchant->getPlan()),
-        ], 201);
+        return new JsonResponse($this->formatMerchant($merchant), 201);
     }
 
     #[Route('/api/merchants/{id}', name: 'update_merchant', methods: ['PUT'])]
@@ -170,8 +185,26 @@ class MerchantController extends AbstractController
         }
 
         $data = json_decode($request->getContent(), true);
-        if (isset($data['company_name'])) {
+        if (array_key_exists('company_name', $data)) {
+            if (!is_string($data['company_name']) || trim($data['company_name']) === '') {
+                return new JsonResponse(['error' => 'company_name must be a non-empty string'], 400);
+            }
+
             $merchant->setCompanyName($data['company_name']);
+        }
+        if (array_key_exists('phone', $data)) {
+            if ($data['phone'] !== null && !is_string($data['phone'])) {
+                return new JsonResponse(['error' => 'phone must be a string or null'], 400);
+            }
+
+            $merchant->setPhone($data['phone']);
+        }
+        if (array_key_exists('address', $data)) {
+            if ($data['address'] !== null && !is_string($data['address'])) {
+                return new JsonResponse(['error' => 'address must be a string or null'], 400);
+            }
+
+            $merchant->setAddress($data['address']);
         }
         if (isset($data['email'])) {
             $merchant->setEmail($data['email']);
@@ -199,14 +232,47 @@ class MerchantController extends AbstractController
 
         $this->entityManager->flush();
 
-        return new JsonResponse([
-            'id' => $merchant->getId(),
-            'company_name' => $merchant->getCompanyName(),
-            'email' => $merchant->getEmail(),
-            'stripe_customer_id' => $merchant->getStripeCustomerId(),
-            'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
-            'subscription_status' => $merchant->getSubscriptionStatus(),
-            'plan' => $this->formatPlan($merchant->getPlan()),
-        ]);
+        return new JsonResponse($this->formatMerchant($merchant));
+    }
+
+    #[Route('/api/merchants/{id}/logo', name: 'upload_merchant_logo', methods: ['POST'])]
+    public function uploadLogo(string $id, Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $merchant = $this->entityManager->getRepository(Merchant::class)->find($id);
+        if (!$merchant || $merchant->getUser() !== $user) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $logo = $data['logo'] ?? null;
+
+        if (!is_string($logo) || $logo === '') {
+            return new JsonResponse(['error' => 'logo is required'], 400);
+        }
+
+        if (!preg_match('/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+\/=\s]+)$/i', $logo, $matches)) {
+            return new JsonResponse(['error' => 'Format invalide'], 400);
+        }
+
+        $rawBase64 = preg_replace('/\s+/', '', $matches[2]);
+        $decodedLogo = base64_decode($rawBase64, true);
+
+        if ($decodedLogo === false) {
+            return new JsonResponse(['error' => 'Format invalide'], 400);
+        }
+
+        if (strlen($decodedLogo) > self::MAX_LOGO_SIZE_BYTES) {
+            return new JsonResponse(['error' => 'Fichier trop volumineux (max 5MB)'], 400);
+        }
+
+        $merchant->setLogoUrl($logo);
+        $this->entityManager->flush();
+
+        return new JsonResponse($this->formatMerchant($merchant));
     }
 }

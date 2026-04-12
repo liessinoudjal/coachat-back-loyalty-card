@@ -44,6 +44,9 @@ class LoyaltyCardController extends AbstractController
             'merchant' => $card->getMerchant() ? [
                 'id' => $card->getMerchant()->getId(),
                 'company_name' => $card->getMerchant()->getCompanyName(),
+                'logo_url' => $card->getMerchant()->getLogoUrl(),
+                'phone' => $card->getMerchant()->getPhone(),
+                'address' => $card->getMerchant()->getAddress(),
             ] : null,
         ];
     }
@@ -119,6 +122,9 @@ class LoyaltyCardController extends AbstractController
             'merchant' => $card->getMerchant() ? [
                 'id' => $card->getMerchant()->getId(),
                 'company_name' => $card->getMerchant()->getCompanyName(),
+                'logo_url' => $card->getMerchant()->getLogoUrl(),
+                'phone' => $card->getMerchant()->getPhone(),
+                'address' => $card->getMerchant()->getAddress(),
             ] : null,
         ];
 

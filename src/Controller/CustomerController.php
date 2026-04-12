@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
+use App\Entity\LoyaltyCard;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,6 +27,11 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        }
+
         $data = json_decode($request->getContent(), true);
         if (!isset($data['name']) || !isset($data['email'])) {
             return new JsonResponse(['error' => 'name and email required'], 400);
@@ -35,6 +41,7 @@ class CustomerController extends AbstractController
         $customer->setName($data['name']);
         $customer->setEmail($data['email']);
         $customer->setPhone($data['phone'] ?? null);
+        $customer->setMerchant($merchant);
 
         $this->entityManager->persist($customer);
         $this->entityManager->flush();
@@ -48,14 +55,20 @@ class CustomerController extends AbstractController
     }
 
     #[Route('/api/customers', name: 'get_customers', methods: ['GET'])]
-    public function list(): JsonResponse
+    public function list(Request $request): JsonResponse
     {
         $user = $this->getUser();
         if (!$user) {
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $customers = $this->entityManager->getRepository(Customer::class)->findAll();
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        }
+
+        // Force merchant from JWT, ignore query parameter for security
+        $customers = $this->entityManager->getRepository(Customer::class)->findByMerchant($merchant);
 
         return new JsonResponse(array_map(fn(Customer $c) => [
             'id' => $c->getId(),
@@ -73,8 +86,15 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $customer = $this->entityManager->getRepository(Customer::class)->find($id);
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        }
+
+        // Secure lookup: customer must belong to current merchant
+        $customer = $this->entityManager->getRepository(Customer::class)->findByIdAndMerchant($id, $merchant);
         if (!$customer) {
+            // Return 404 for both "not found" and "not authorized" to prevent info leakage
             return new JsonResponse(['error' => 'Customer not found'], 404);
         }
 
@@ -94,7 +114,13 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $customer = $this->entityManager->getRepository(Customer::class)->find($id);
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        }
+
+        // Secure lookup: customer must belong to current merchant
+        $customer = $this->entityManager->getRepository(Customer::class)->findByIdAndMerchant($id, $merchant);
         if (!$customer) {
             return new JsonResponse(['error' => 'Customer not found'], 404);
         }
@@ -128,10 +154,26 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $customer = $this->entityManager->getRepository(Customer::class)->find($id);
+        $merchant = $user->getMerchant();
+        if (!$merchant) {
+            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        }
+
+        // Secure lookup: customer must belong to current merchant
+        $customer = $this->entityManager->getRepository(Customer::class)->findByIdAndMerchant($id, $merchant);
         if (!$customer) {
             return new JsonResponse(['error' => 'Customer not found'], 404);
         }
+
+        // Keep loyalty cards and detach customer link before deleting customer.
+        $this->entityManager->createQueryBuilder()
+            ->update(LoyaltyCard::class, 'lc')
+            ->set('lc.customer', ':nullCustomer')
+            ->where('lc.customer = :customer')
+            ->setParameter('nullCustomer', null)
+            ->setParameter('customer', $customer)
+            ->getQuery()
+            ->execute();
 
         $this->entityManager->remove($customer);
         $this->entityManager->flush();

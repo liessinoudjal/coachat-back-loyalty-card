@@ -3,6 +3,10 @@
         "/^php bin/phpunit tests/Service/CustomerPortalServiceTest\\.php tests/Service/RewardServiceTest\\.php tests/Controller/CustomerPortalControllerTest\\.php$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^php bin/phpunit tests/Controller/CustomerSecurityControllerTest\\.php$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

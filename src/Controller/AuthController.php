@@ -159,6 +159,10 @@ class AuthController extends AbstractController
         return new JsonResponse([
             'id' => $merchant->getId(),
             'company_name' => $merchant->getCompanyName(),
+            'email' => $merchant->getEmail(),
+            'phone' => $merchant->getPhone(),
+            'address' => $merchant->getAddress(),
+            'logo_url' => $merchant->getLogoUrl(),
             'user' => [
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),

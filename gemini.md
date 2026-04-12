@@ -156,7 +156,7 @@ Déconnecte l'utilisateur en invalidant le refresh token.
 
 ## Merchants (Commerçants)
 
-### Get Current Merchant
+### Get Current Merchant (Compact)
 ```
 GET /api/merchants/me
 ```
@@ -172,6 +172,36 @@ Retourne le commerçant associé à l'utilisateur connecté.
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "company_name": "My Store",
   "email": "store@example.com",
+  "phone": "01 23 45 67 89",
+  "address": "123 rue de la Paix, 75000 Paris",
+  "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+  "user": {
+    "id": 1,
+    "email": "owner@example.com",
+    "name": "Owner Name"
+  }
+}
+```
+
+### Get Current Merchant (Detailed)
+```
+GET /api/merchant/me
+```
+
+Retourne le commerçant connecté avec plan + compteurs.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Réponse :**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "company_name": "My Store",
+  "email": "store@example.com",
+  "phone": "01 23 45 67 89",
+  "address": "123 rue de la Paix, 75000 Paris",
+  "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
   "stripe_customer_id": "cus_123456",
   "trial_ends_at": "2026-05-03T00:00:00Z",
   "subscription_status": "active",
@@ -209,16 +239,41 @@ Crée un nouveau commerçant pour l'utilisateur connecté.
 ```json
 {
   "company_name": "My Store Name",
-  "email": "store@example.com"
+  "phone": "01 23 45 67 89",
+  "address": "123 rue de la Paix, 75000 Paris"
 }
 ```
+
+**Règles :**
+- `company_name` requis, string non vide
+- `phone` optionnel, `string|null`
+- `address` optionnel, `string|null`
+- `logo_url` est toujours `null` à la création (upload via endpoint dédié)
 
 **Réponse :**
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "company_name": "My Store Name",
-  "email": "store@example.com"
+  "email": "store@example.com",
+  "phone": "01 23 45 67 89",
+  "address": "123 rue de la Paix, 75000 Paris",
+  "logo_url": null,
+  "stripe_customer_id": null,
+  "trial_ends_at": "2026-05-12T12:00:00Z",
+  "subscription_status": "trial",
+  "active_loyalty_program_count": 0,
+  "plan": {
+    "id": "...",
+    "slug": "free",
+    "name": "Gratuit",
+    "price_monthly": 0,
+    "max_customers": 100,
+    "max_programs": 1,
+    "has_wallet_integration": false,
+    "has_push_notifications": false,
+    "has_advanced_stats": false
+  }
 }
 ```
 
@@ -273,17 +328,54 @@ Met à jour un commerçant.
 ```json
 {
   "company_name": "Updated Store Name",
-  "email": "updated@example.com",
-  "stripe_customer_id": "cus_updated",
-  "trial_ends_at": "2026-06-03T00:00:00Z",
-  "subscription_status": "active",
-  "plan_slug": "standard"
+  "phone": "06 12 34 56 78",
+  "address": "Nouvelle adresse"
 }
 ```
+
+**Comportement :**
+- Update partiel : seuls les champs présents sont modifiés
+- Tous les champs du body sont optionnels
+- `company_name` non vide si présent
+- `phone` format libre (`string|null`)
+- `address` format libre (`string|null`)
+- Le merchant ne peut modifier que son propre profil
 
 **Champs optionnels pour le plan** :
 - `plan_id` : UUID du plan à assigner
 - `plan_slug` : slug du plan à assigner (`free`, `standard`, `premium`)
+
+### Upload Merchant Logo
+```
+POST /api/merchants/{id}/logo
+```
+
+Upload/remplacement du logo merchant (MVP: stockage base64 direct en DB).
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Body :**
+```json
+{
+  "logo": "data:image/png;base64,iVBORw0KGgoAAAANS..."
+}
+```
+
+**Règles :**
+- Formats acceptés: `image/png`, `image/jpeg`, `image/jpg`, `image/webp`
+- Le champ doit être une data URL base64 valide
+- Taille max: 5MB (taille binaire décodée)
+- Le merchant ne peut uploader que son propre logo
+- Le logo existant est remplacé
+
+**Erreurs fréquentes :**
+- `400` `logo is required`
+- `400` `Format invalide`
+- `400` `Fichier trop volumineux (max 5MB)`
+- `404` `Merchant not found`
+
+**Réponse :** objet merchant à jour (incluant `logo_url`)
 
 ## Plans (Abonnements)
 
@@ -477,7 +569,10 @@ Retourne toutes les cartes de fidélité d'un commerçant.
     },
     "merchant": {
       "id": 1,
-      "company_name": "Mon Commerce"
+      "company_name": "Mon Commerce",
+      "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+      "phone": "01 23 45 67 89",
+      "address": "123 rue de la Paix, 75000 Paris"
     }
   }
 ]
@@ -496,6 +591,19 @@ Retourne une carte de fidélité par son `wallet_token` (UUID v4).
 **Comportement d'accès :**
 - Utilisateur non connecté : accès autorisé avec payload public (pas d'email customer).
 - Merchant propriétaire connecté : payload complet.
+
+**Payload merchant retourné (public et privé) :**
+```json
+{
+  "merchant": {
+    "id": "...",
+    "company_name": "Cafe du Centre",
+    "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+    "phone": "01 23 45 67 89",
+    "address": "123 rue de la Paix, 75000 Paris"
+  }
+}
+```
 
 ### Create Loyalty Card
 ```
@@ -538,7 +646,10 @@ Crée une nouvelle carte de fidélité.
   },
   "merchant": {
     "id": 1,
-    "company_name": "Mon Commerce"
+    "company_name": "Mon Commerce",
+    "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+    "phone": "01 23 45 67 89",
+    "address": "123 rue de la Paix, 75000 Paris"
   }
 }
 ```
@@ -584,7 +695,10 @@ Met à jour une carte de fidélité.
   },
   "merchant": {
     "id": 1,
-    "company_name": "Mon Commerce"
+    "company_name": "Mon Commerce",
+    "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+    "phone": "01 23 45 67 89",
+    "address": "123 rue de la Paix, 75000 Paris"
   }
 }
 ```
@@ -1193,10 +1307,17 @@ Cartes de test Stripe :
 GET /api/customers
 ```
 
-Retourne tous les clients.
+Retourne tous les clients du merchant courant (JWT merchant uniquement).
 
 **Headers :**
-- `Authorization: Bearer <token>`
+- `Authorization: Bearer <token>` (requis)
+
+**Sécurité :**
+- ✅ Retourne SEULEMENT les customers appartenant au merchant du JWT
+- ✅ Les customers apparaissent s'ils appartiennent directement au merchant
+- ✅ Les customers historiques (via loyalty card/program du merchant) restent visibles
+- ✅ Les paramètres query `?merchant=xyz` sont ignorés (force merchant du JWT)
+- ✅ Pas de leakage de données multi-tenant
 
 **Réponse :**
 ```json
@@ -1210,17 +1331,29 @@ Retourne tous les clients.
 ]
 ```
 
+**Erreurs :**
+- `401` : Token JWT manquant ou invalide
+- `404` : Utilisateur authentifié mais aucun merchant associé
+
 ### Get Customer
 ```
 GET /api/customers/{id}
 ```
 
-Retourne un client par son ID.
+Retourne un client par son ID si le client appartient au merchant courant.
 
 **Headers :**
-- `Authorization: Bearer <token>`
+- `Authorization: Bearer <token>` (requis)
 
-**Réponse :**
+**Paramètres :**
+- `id` : ID du customer à récupérer
+
+**Sécurité :**
+- ✅ Retourne le customer SEULEMENT s'il appartient au merchant du JWT
+- ✅ Retourne 404 si le customer n'appartient pas au merchant (pas de info leakage)
+- ✅ Pas d'accès cross-merchant
+
+**Réponse (succès) :**
 ```json
 {
   "id": 1,
@@ -1229,6 +1362,10 @@ Retourne un client par son ID.
   "phone": "+1234567890"
 }
 ```
+
+**Erreurs :**
+- `401` : Token JWT manquant ou invalide
+- `404` : Customer introuvable OU n'appartient pas au merchant courant
 
 ### Create Customer
 ```
@@ -1269,10 +1406,13 @@ Crée un nouveau client.
 PUT /api/customers/{id}
 ```
 
-Met à jour un client.
+Met à jour un client si le client appartient au merchant courant.
 
 **Headers :**
-- `Authorization: Bearer <token>`
+- `Authorization: Bearer <token>` (requis)
+
+**Paramètres :**
+- `id` : ID du customer à modifier
 
 **Body :**
 ```json
@@ -1283,7 +1423,12 @@ Met à jour un client.
 }
 ```
 
-**Réponse :**
+**Sécurité :**
+- ✅ Modification autorisée SEULEMENT si le customer appartient au merchant du JWT
+- ✅ Retourne 404 en cas d'accès non-autorisé (pas de info leakage)
+- ✅ Pas de modification cross-merchant possible
+
+**Réponse (succès) :**
 ```json
 {
   "id": 1,
@@ -1293,22 +1438,38 @@ Met à jour un client.
 }
 ```
 
+**Erreurs :**
+- `401` : Token JWT manquant ou invalide
+- `404` : Customer introuvable OU n'appartient pas au merchant courant
+
 ### Delete Customer
 ```
 DELETE /api/customers/{id}
 ```
 
-Supprime un client.
+Supprime un client si le client appartient au merchant courant.
 
 **Headers :**
-- `Authorization: Bearer <token>`
+- `Authorization: Bearer <token>` (requis)
 
-**Réponse :**
+**Paramètres :**
+- `id` : ID du customer à supprimer
+
+**Sécurité :**
+- ✅ Suppression autorisée SEULEMENT si le customer appartient au merchant du JWT
+- ✅ Retourne 404 en cas d'accès non-autorisé (pas de info leakage)
+- ✅ Pas de suppression cross-merchant possible
+
+**Réponse (succès) :**
 ```json
 {
   "success": true
 }
 ```
+
+**Erreurs :**
+- `401` : Token JWT manquant ou invalide
+- `404` : Customer introuvable OU n'appartient pas au merchant courant
 
 ## Error Handling
 
@@ -1327,13 +1488,24 @@ Codes d'erreur courants :
 - `500` : Internal Server Error
 
 ## Security
-_card
+
+### Authentification & Autorisation
 - Toutes les requêtes (sauf authentification) nécessitent un JWT token valide
-- Les ressources sont filtrées par utilisateur/commerçant pour la sécurité
+- Les ressources sont filtrées par utilisateur/commerçant pour la sécurité (multi-tenant)
+- Guard `IsMerchantOwner` assure que seul le propriétaire peut accéder/modifier ses ressources
+
+### Multi-Tenant Security (Customers)
+- **GET /api/customers** : Retourne SEULEMENT les customers du merchant JWT
+- **GET /api/customers/{id}** : Accès refusé (404) si customer ≠ merchant JWT
+- **PUT /api/customers/{id}** : Modification refusée (404) si customer ≠ merchant JWT
+- **DELETE /api/customers/{id}** : Suppression refusée (404) si customer ≠ merchant JWT
+- Les paramètres query merchantId sont ignorés (force le JWT merchant)
+- Réponse uniforme 404 ('not found' vs 'not authorized') pour éviter les info leaks
+
+### CORS Configuration
 - CORS est configuré pour permettre les requêtes depuis :
   - `http://localhost:5173` (développement frontend)
   - `http://coachat-bakend-loyalty-card.test` (développement)
-- Guard `IsMerchantOwner` assure que seul le propriétaire peut accéder/modifier ses ressources
 - Refresh tokens persistés en BDD avec expiration
 
 ## Technologies Used
