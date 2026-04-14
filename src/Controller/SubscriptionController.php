@@ -156,7 +156,14 @@ class SubscriptionController extends AbstractController
     {
         $merchant = $this->entityManager->getRepository(Merchant::class)->findOneBy(['stripeCustomerId' => $subscription->customer]);
         if (!$merchant) return;
-        $merchant->setSubscriptionStatus($subscription->status === 'active' ? 'active' : 'inactive');
+
+        if ($subscription->cancel_at !== null) {
+            // Cancellation scheduled at end of billing period
+            $merchant->setSubscriptionStatus('canceling');
+        } else {
+            $merchant->setSubscriptionStatus($subscription->status === 'active' ? 'active' : 'inactive');
+        }
+
         $this->entityManager->flush();
     }
 
