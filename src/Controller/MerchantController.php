@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Merchant;
 use App\Repository\PlanRepository;
+use App\Service\LegalTermsVersionProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,11 +18,13 @@ class MerchantController extends AbstractController
 
     private $entityManager;
     private $planRepository;
+    private LegalTermsVersionProvider $legalTermsVersionProvider;
 
-    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository)
+    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, LegalTermsVersionProvider $legalTermsVersionProvider)
     {
         $this->entityManager = $entityManager;
         $this->planRepository = $planRepository;
+        $this->legalTermsVersionProvider = $legalTermsVersionProvider;
     }
 
     private function formatPlan(?\App\Entity\Plan $plan): ?array
@@ -72,6 +75,9 @@ class MerchantController extends AbstractController
             'logo_url' => $merchant->getLogoUrl(),
             'stripe_customer_id' => $merchant->getStripeCustomerId(),
             'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
+            'accepted_terms' => $merchant->isAcceptedTerms(),
+            'accepted_terms_version' => $merchant->getAcceptedTermsVersion(),
+            'accepted_terms_accepted_at' => $merchant->getAcceptedTermsAcceptedAt() ? (clone $merchant->getAcceptedTermsAcceptedAt())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z') : null,
             'subscription_status' => $merchant->getSubscriptionStatus(),
             'active_loyalty_program_count' => $merchant->getActiveLoyaltyProgramCount(),
             'plan' => $this->formatPlan($merchant->getPlan()),
@@ -151,6 +157,26 @@ class MerchantController extends AbstractController
         if (mb_strlen(trim($data['city'])) > 100) {
             return new JsonResponse(['error' => 'city must be at most 100 characters'], 400);
         }
+        if (!array_key_exists('accepted_terms', $data) || $data['accepted_terms'] !== true) {
+            return new JsonResponse(['error' => 'accepted_terms must be true'], 422);
+        }
+        if (!array_key_exists('accepted_terms_version', $data) || !is_string($data['accepted_terms_version']) || trim($data['accepted_terms_version']) === '') {
+            return new JsonResponse(['error' => 'accepted_terms_version required'], 422);
+        }
+        if (mb_strlen(trim($data['accepted_terms_version'])) > 32) {
+            return new JsonResponse(['error' => 'accepted_terms_version must be at most 32 characters'], 422);
+        }
+        if (trim($data['accepted_terms_version']) !== $this->legalTermsVersionProvider->getCurrentVersion()) {
+            return new JsonResponse(['error' => 'accepted_terms_version is outdated'], 422);
+        }
+        if (!array_key_exists('accepted_terms_accepted_at', $data) || !is_string($data['accepted_terms_accepted_at'])) {
+            return new JsonResponse(['error' => 'accepted_terms_accepted_at required'], 422);
+        }
+        try {
+            $acceptedAt = new \DateTime($data['accepted_terms_accepted_at']);
+        } catch (\Exception) {
+            return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
+        }
 
         $merchant = new Merchant();
         $merchant->setCompanyName(trim($data['company_name']));
@@ -160,6 +186,9 @@ class MerchantController extends AbstractController
         $merchant->setPostalCode(trim($data['postal_code']));
         $merchant->setCity(trim($data['city']));
         $merchant->setLogoUrl(null);
+        $merchant->setAcceptedTerms(true);
+        $merchant->setAcceptedTermsVersion(trim($data['accepted_terms_version']));
+        $merchant->setAcceptedTermsAcceptedAt($acceptedAt);
         $merchant->setSubscriptionStatus($data['subscription_status'] ?? 'trial');
 
         if (isset($data['trial_ends_at'])) {
@@ -247,6 +276,43 @@ class MerchantController extends AbstractController
             }
 
             $merchant->setCity($data['city'] !== null ? trim($data['city']) : null);
+        }
+        if (array_key_exists('accepted_terms', $data)) {
+            if ($data['accepted_terms'] !== true) {
+                return new JsonResponse(['error' => 'accepted_terms cannot be set to false'], 422);
+            }
+
+            $merchant->setAcceptedTerms(true);
+        }
+        if (array_key_exists('accepted_terms_version', $data)) {
+            if (!is_string($data['accepted_terms_version']) || trim($data['accepted_terms_version']) === '') {
+                return new JsonResponse(['error' => 'accepted_terms_version must be a non-empty string'], 422);
+            }
+            if (mb_strlen(trim($data['accepted_terms_version'])) > 32) {
+                return new JsonResponse(['error' => 'accepted_terms_version must be at most 32 characters'], 422);
+            }
+            if (!$merchant->isAcceptedTerms()) {
+                return new JsonResponse(['error' => 'accepted_terms must be true to set acceptance metadata'], 422);
+            }
+            if (trim($data['accepted_terms_version']) !== $this->legalTermsVersionProvider->getCurrentVersion()) {
+                return new JsonResponse(['error' => 'accepted_terms_version is outdated'], 422);
+            }
+
+            $merchant->setAcceptedTermsVersion(trim($data['accepted_terms_version']));
+        }
+        if (array_key_exists('accepted_terms_accepted_at', $data)) {
+            if (!is_string($data['accepted_terms_accepted_at'])) {
+                return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
+            }
+            if (!$merchant->isAcceptedTerms()) {
+                return new JsonResponse(['error' => 'accepted_terms must be true to set acceptance metadata'], 422);
+            }
+
+            try {
+                $merchant->setAcceptedTermsAcceptedAt(new \DateTime($data['accepted_terms_accepted_at']));
+            } catch (\Exception) {
+                return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
+            }
         }
         if (isset($data['email'])) {
             $merchant->setEmail($data['email']);

@@ -174,6 +174,8 @@ Retourne le commerçant associé à l'utilisateur connecté.
   "email": "store@example.com",
   "phone": "01 23 45 67 89",
   "address": "123 rue de la Paix, 75000 Paris",
+  "postal_code": "75000",
+  "city": "Paris",
   "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
   "user": {
     "id": 1,
@@ -201,6 +203,8 @@ Retourne le commerçant connecté avec plan + compteurs.
   "email": "store@example.com",
   "phone": "01 23 45 67 89",
   "address": "123 rue de la Paix, 75000 Paris",
+  "postal_code": "75000",
+  "city": "Paris",
   "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
   "stripe_customer_id": "cus_123456",
   "trial_ends_at": "2026-05-03T00:00:00Z",
@@ -240,15 +244,30 @@ Crée un nouveau commerçant pour l'utilisateur connecté.
 {
   "company_name": "My Store Name",
   "phone": "01 23 45 67 89",
-  "address": "123 rue de la Paix, 75000 Paris"
+  "address": "123 rue de la Paix, 75000 Paris",
+  "postal_code": "75000",
+  "city": "Paris",
+  "accepted_terms": true,
+  "accepted_terms_version": "2026-04-15",
+  "accepted_terms_accepted_at": "2026-04-15T10:15:00Z"
 }
 ```
 
 **Règles :**
 - `company_name` requis, string non vide
+- `postal_code` requis à la création, format libre, max 10 caractères
+- `city` requis à la création, format libre, max 100 caractères
+- `accepted_terms` requis à la création et doit être `true`
+- `accepted_terms_version` requis à la création, string non vide, max 32 caractères
+- `accepted_terms_accepted_at` requis à la création, datetime ISO 8601 valide
 - `phone` optionnel, `string|null`
 - `address` optionnel, `string|null`
 - `logo_url` est toujours `null` à la création (upload via endpoint dédié)
+
+**Codes d'erreur de validation légale :**
+- `422` : `accepted_terms must be true`
+- `422` : `accepted_terms_version required`
+- `422` : `accepted_terms_accepted_at must be a valid datetime`
 
 **Réponse :**
 ```json
@@ -258,9 +277,14 @@ Crée un nouveau commerçant pour l'utilisateur connecté.
   "email": "store@example.com",
   "phone": "01 23 45 67 89",
   "address": "123 rue de la Paix, 75000 Paris",
+  "postal_code": "75000",
+  "city": "Paris",
   "logo_url": null,
   "stripe_customer_id": null,
   "trial_ends_at": "2026-05-12T12:00:00Z",
+  "accepted_terms": true,
+  "accepted_terms_version": "2026-04-15",
+  "accepted_terms_accepted_at": "2026-04-15T10:15:00Z",
   "subscription_status": "trial",
   "active_loyalty_program_count": 0,
   "plan": {
@@ -329,7 +353,11 @@ Met à jour un commerçant.
 {
   "company_name": "Updated Store Name",
   "phone": "06 12 34 56 78",
-  "address": "Nouvelle adresse"
+  "address": "Nouvelle adresse",
+  "postal_code": "69002",
+  "city": "Lyon",
+  "accepted_terms_version": "2026-05-01",
+  "accepted_terms_accepted_at": "2026-05-01T12:00:00Z"
 }
 ```
 
@@ -339,6 +367,10 @@ Met à jour un commerçant.
 - `company_name` non vide si présent
 - `phone` format libre (`string|null`)
 - `address` format libre (`string|null`)
+- `postal_code` format libre (`string|null`), max 10 caractères si présent
+- `city` format libre (`string|null`), max 100 caractères si présent
+- `accepted_terms` ne peut pas être remis à `false` (retourne `422`)
+- `accepted_terms_version` et `accepted_terms_accepted_at` peuvent être mis à jour uniquement avec des valeurs valides
 - Le merchant ne peut modifier que son propre profil
 
 **Champs optionnels pour le plan** :
@@ -376,6 +408,58 @@ Upload/remplacement du logo merchant (MVP: stockage base64 direct en DB).
 - `404` `Merchant not found`
 
 **Réponse :** objet merchant à jour (incluant `logo_url`)
+
+### Preuve d'acceptation légale
+
+Les informations suivantes sont persistées sur le merchant :
+- `accepted_terms` (bool)
+- `accepted_terms_version` (string)
+- `accepted_terms_accepted_at` (datetime)
+
+Ces champs sont retournés dans toutes les réponses merchant principales (`/api/merchant/me`, `/api/merchants/me`, réponses create/update merchant).
+
+## Versionning des conditions légales
+
+### Format de version recommandé
+
+Utiliser une version lisible, stable et strictement monotone.
+
+Recommandation MVP :
+- format date de publication : `YYYY-MM-DD` (exemple `2026-04-15`)
+- 1 version publiée = 1 valeur unique
+
+Alternative plus explicite (si besoin de variantes) :
+- `YYYY-MM-DD.N` (exemple `2026-04-15.1`)
+
+### Règles opérationnelles
+
+1. Publier une nouvelle version légale :
+- incrémenter `CURRENT_TERMS_VERSION` côté front/back (même valeur)
+- déployer le nouveau texte légal
+
+2. Onboarding :
+- le front envoie la version affichée au user via `accepted_terms_version`
+- le back persiste cette version + la date d'acceptation
+
+3. Re-acceptation (si texte mis à jour) :
+- comparer `merchant.accepted_terms_version` à la version courante
+- si différente, forcer l'écran de ré-acceptation
+- appeler `PUT /api/merchants/{id}` avec la nouvelle version + nouvelle date
+
+### Bonnes pratiques d'audit
+
+1. Ne jamais modifier rétroactivement une version déjà publiée.
+2. Conserver l'archive du texte légal pour chaque version (fichier horodaté ou stockage immutable).
+3. Journaliser qui a accepté, quand, et avec quelle version (les 3 champs ci-dessus).
+4. Toujours stocker/afficher les dates en UTC (`...Z`) pour éviter les ambiguïtés fuseau.
+
+### Politique de date d'acceptation
+
+Stratégie actuelle API :
+- la date envoyée par le frontend (`accepted_terms_accepted_at`) est validée puis persistée.
+
+Option plus stricte (future) :
+- ignorer la date front et imposer la date serveur pour réduire la surface de fraude horodatage.
 
 ## Plans (Abonnements)
 
@@ -572,7 +656,9 @@ Retourne toutes les cartes de fidélité d'un commerçant.
       "company_name": "Mon Commerce",
       "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
       "phone": "01 23 45 67 89",
-      "address": "123 rue de la Paix, 75000 Paris"
+      "address": "123 rue de la Paix, 75000 Paris",
+      "postal_code": "75000",
+      "city": "Paris"
     }
   }
 ]
@@ -600,7 +686,9 @@ Retourne une carte de fidélité par son `wallet_token` (UUID v4).
     "company_name": "Cafe du Centre",
     "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
     "phone": "01 23 45 67 89",
-    "address": "123 rue de la Paix, 75000 Paris"
+    "address": "123 rue de la Paix, 75000 Paris",
+    "postal_code": "75000",
+    "city": "Paris"
   }
 }
 ```
@@ -649,7 +737,9 @@ Crée une nouvelle carte de fidélité.
     "company_name": "Mon Commerce",
     "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
     "phone": "01 23 45 67 89",
-    "address": "123 rue de la Paix, 75000 Paris"
+    "address": "123 rue de la Paix, 75000 Paris",
+    "postal_code": "75000",
+    "city": "Paris"
   }
 }
 ```
@@ -698,7 +788,9 @@ Met à jour une carte de fidélité.
     "company_name": "Mon Commerce",
     "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
     "phone": "01 23 45 67 89",
-    "address": "123 rue de la Paix, 75000 Paris"
+    "address": "123 rue de la Paix, 75000 Paris",
+    "postal_code": "75000",
+    "city": "Paris"
   }
 }
 ```
@@ -1135,7 +1227,7 @@ Endpoint qui reçoit les webhooks Stripe (à configurer dans Stripe Dashboard).
 | Événement | Effet |
 |-----------|-------|
 | `checkout.session.completed` | Assigne le plan au merchant + statut `active` |
-| `customer.subscription.updated` | Synchronise le statut (`active` / `inactive`) |
+| `customer.subscription.updated` | Synchronise le statut (`active` / `inactive` / `canceling`) et backfill `current_period_start_at` / `current_period_end_at` si absents |
 | `customer.subscription.deleted` | Retour au plan `free` + statut `canceled` |
 | `invoice.payment_failed` | Statut `suspended` |
 
@@ -1271,6 +1363,40 @@ Table `customer_portal_session` créée dans `Version20260409000001`.
 8. Stripe envoie webhook `checkout.session.completed`
 9. Backend assigne le plan au merchant et met à jour `subscription_status` à `active`
 10. Frontend récupère le statut via `GET /api/merchant/me`
+
+### Subscription Status
+```
+GET /api/subscription/status
+```
+
+Retourne le statut d'abonnement du merchant connecté avec les périodes Stripe.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Réponse :**
+```json
+{
+  "subscription_status": "active",
+  "trial_ends_at": "2026-05-05T23:49:58Z",
+  "current_period_start": "2026-04-05T23:49:58Z",
+  "current_period_end": "2026-05-05T23:49:58Z",
+  "plan": {
+    "id": "a2ff47c7-b7e4-43ad-9a45-9bf87f5c6956",
+    "slug": "standard",
+    "name": "Standard",
+    "price_monthly": 1900
+  }
+}
+```
+
+**Règles métier :**
+- `trial_ends_at` reste toujours présent pour compatibilité future (A/B testing trial).
+- `current_period_start` et `current_period_end` reflètent les timestamps Stripe convertis en UTC ISO 8601 (`...Z`).
+- Source prioritaire : dates persistées sur `merchant.current_period_start_at` et `merchant.current_period_end_at`.
+- Fallback : appel Stripe si une des dates persistées est absente.
+- Sans subscription Stripe exploitable : `current_period_start = null` et `current_period_end = null`.
+- En statut `canceling`, `current_period_end` correspond à la vraie date de fin d'accès payant Stripe.
 
 ### Permissions de la clé API Stripe
 
@@ -1561,5 +1687,6 @@ User (1) -- (*) RefreshToken
 ### Subscription Status
 - `trial` : Période d'essai
 - `active` : Actif et payant
+- `canceling` : Annulation programmée à la fin de période
 - `canceled` : Annulé
 - `suspended` : Suspendu

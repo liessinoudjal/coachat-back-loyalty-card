@@ -165,6 +165,9 @@ class AuthController extends AbstractController
             'postal_code' => $merchant->getPostalCode(),
             'city' => $merchant->getCity(),
             'logo_url' => $merchant->getLogoUrl(),
+            'accepted_terms' => $merchant->isAcceptedTerms(),
+            'accepted_terms_version' => $merchant->getAcceptedTermsVersion(),
+            'accepted_terms_accepted_at' => $merchant->getAcceptedTermsAcceptedAt() ? (clone $merchant->getAcceptedTermsAcceptedAt())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z') : null,
             'user' => [
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),

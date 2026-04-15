@@ -52,6 +52,15 @@ class Merchant
     #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
     private ?\DateTimeInterface $currentPeriodEndAt = null;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $acceptedTerms = false;
+
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $acceptedTermsVersion = null;
+
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    private ?\DateTimeInterface $acceptedTermsAcceptedAt = null;
+
     #[ORM\Column(length: 50)]
     private string $subscriptionStatus = 'trial';
 
@@ -224,6 +233,42 @@ class Merchant
     public function setCurrentPeriodEndAt(?\DateTimeInterface $currentPeriodEndAt): static
     {
         $this->currentPeriodEndAt = $this->toMutableDateTime($currentPeriodEndAt);
+
+        return $this;
+    }
+
+    public function isAcceptedTerms(): bool
+    {
+        return $this->acceptedTerms;
+    }
+
+    public function setAcceptedTerms(bool $acceptedTerms): static
+    {
+        $this->acceptedTerms = $acceptedTerms;
+
+        return $this;
+    }
+
+    public function getAcceptedTermsVersion(): ?string
+    {
+        return $this->acceptedTermsVersion;
+    }
+
+    public function setAcceptedTermsVersion(?string $acceptedTermsVersion): static
+    {
+        $this->acceptedTermsVersion = $acceptedTermsVersion;
+
+        return $this;
+    }
+
+    public function getAcceptedTermsAcceptedAt(): ?\DateTimeInterface
+    {
+        return $this->acceptedTermsAcceptedAt;
+    }
+
+    public function setAcceptedTermsAcceptedAt(?\DateTimeInterface $acceptedTermsAcceptedAt): static
+    {
+        $this->acceptedTermsAcceptedAt = $this->toMutableDateTime($acceptedTermsAcceptedAt);
 
         return $this;
     }

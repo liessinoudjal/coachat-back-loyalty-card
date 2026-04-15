@@ -7,6 +7,7 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    legal_terms_current_version: '%env(LEGAL_TERMS_CURRENT_VERSION)%'
 
 services:
     # default configuration for services in *this* file
@@ -52,6 +53,10 @@ services:
             $enabled: '%env(bool:GOOGLE_WALLET_ENABLED)%'
             $issuerId: '%env(GOOGLE_WALLET_ISSUER_ID)%'
             $serviceAccountKeyPath: '%env(GOOGLE_WALLET_SERVICE_ACCOUNT_KEY_PATH)%'
+
+    App\Service\LegalTermsVersionProvider:
+        arguments:
+            $currentVersion: '%legal_terms_current_version%'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

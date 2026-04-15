@@ -35,6 +35,9 @@ class MerchantProfileControllerTest extends WebTestCase
                 'address' => '123 rue de la Paix, 75000 Paris',
                 'postal_code' => '75000',
                 'city' => 'Paris',
+                'accepted_terms' => true,
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => '2026-04-15T10:15:00Z',
             ], JSON_THROW_ON_ERROR),
         );
 
@@ -46,6 +49,9 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('123 rue de la Paix, 75000 Paris', $payload['address']);
         self::assertSame('75000', $payload['postal_code']);
         self::assertSame('Paris', $payload['city']);
+        self::assertTrue($payload['accepted_terms']);
+        self::assertSame('2026-04-15', $payload['accepted_terms_version']);
+        self::assertSame('2026-04-15T10:15:00Z', $payload['accepted_terms_accepted_at']);
         self::assertNull($payload['logo_url']);
     }
 
@@ -74,6 +80,124 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('postal_code required', $payload['error']);
     }
 
+    public function testCreateMerchantRefusedWhenAcceptedTermsMissing(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('create-missing-accepted-terms');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'company_name' => 'Missing Terms Shop',
+                'postal_code' => '75000',
+                'city' => 'Paris',
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => '2026-04-15T10:15:00Z',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(422);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('accepted_terms must be true', $payload['error']);
+    }
+
+    public function testCreateMerchantRefusedWhenAcceptedTermsIsFalse(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('create-false-accepted-terms');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'company_name' => 'False Terms Shop',
+                'postal_code' => '75000',
+                'city' => 'Paris',
+                'accepted_terms' => false,
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => '2026-04-15T10:15:00Z',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(422);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('accepted_terms must be true', $payload['error']);
+    }
+
+    public function testCreateMerchantRefusedWhenAcceptedTermsVersionMissing(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('create-missing-terms-version');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'company_name' => 'Missing Version Shop',
+                'postal_code' => '75000',
+                'city' => 'Paris',
+                'accepted_terms' => true,
+                'accepted_terms_accepted_at' => '2026-04-15T10:15:00Z',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(422);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('accepted_terms_version required', $payload['error']);
+    }
+
+    public function testCreateMerchantRefusedWhenAcceptedTermsAcceptedAtInvalid(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('create-invalid-terms-date');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'company_name' => 'Invalid Date Shop',
+                'postal_code' => '75000',
+                'city' => 'Paris',
+                'accepted_terms' => true,
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => 'invalid-date',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(422);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('accepted_terms_accepted_at must be a valid datetime', $payload['error']);
+    }
+
     public function testPartialUpdateMerchantProfile(): void
     {
         $client = static::createClient();
@@ -98,6 +222,9 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertNull($payload['address']);
         self::assertNull($payload['postal_code']);
         self::assertNull($payload['city']);
+        self::assertTrue($payload['accepted_terms']);
+        self::assertSame('2026-04-15', $payload['accepted_terms_version']);
+        self::assertSame('2026-04-15T10:15:00Z', $payload['accepted_terms_accepted_at']);
 
         $client->request(
             'PUT',
@@ -110,6 +237,8 @@ class MerchantProfileControllerTest extends WebTestCase
                 'address' => '42 avenue Victor Hugo',
                 'postal_code' => '69002',
                 'city' => 'Lyon',
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => '2026-05-01T12:00:00Z',
             ], JSON_THROW_ON_ERROR),
         );
 
@@ -119,6 +248,33 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('42 avenue Victor Hugo', $payload['address']);
         self::assertSame('69002', $payload['postal_code']);
         self::assertSame('Lyon', $payload['city']);
+        self::assertTrue($payload['accepted_terms']);
+        self::assertSame('2026-04-15', $payload['accepted_terms_version']);
+        self::assertSame('2026-05-01T12:00:00Z', $payload['accepted_terms_accepted_at']);
+    }
+
+    public function testMerchantCannotSetAcceptedTermsToFalse(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('accepted-terms-false-update');
+        $merchant = $this->createMerchant($user, 'Terms Shop');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'PUT',
+            '/api/merchants/' . $merchant->getId()->toRfc4122(),
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode(['accepted_terms' => false], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(422);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('accepted_terms cannot be set to false', $payload['error']);
     }
 
     public function testMerchantCannotUpdateAnotherMerchantProfile(): void
@@ -250,11 +406,17 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertArrayHasKey('address', $payload);
         self::assertArrayHasKey('postal_code', $payload);
         self::assertArrayHasKey('city', $payload);
+        self::assertArrayHasKey('accepted_terms', $payload);
+        self::assertArrayHasKey('accepted_terms_version', $payload);
+        self::assertArrayHasKey('accepted_terms_accepted_at', $payload);
         self::assertArrayHasKey('logo_url', $payload);
         self::assertSame('01 11 22 33 44', $payload['phone']);
         self::assertSame('10 rue Profile', $payload['address']);
         self::assertSame('33000', $payload['postal_code']);
         self::assertSame('Bordeaux', $payload['city']);
+        self::assertTrue($payload['accepted_terms']);
+        self::assertSame('2026-04-15', $payload['accepted_terms_version']);
+        self::assertSame('2026-04-15T10:15:00Z', $payload['accepted_terms_accepted_at']);
         self::assertStringStartsWith('data:image/webp;base64,', $payload['logo_url']);
     }
 
@@ -335,6 +497,9 @@ class MerchantProfileControllerTest extends WebTestCase
         $merchant->setLogoUrl($logoUrl);
         $merchant->setPostalCode($postalCode);
         $merchant->setCity($city);
+        $merchant->setAcceptedTerms(true);
+        $merchant->setAcceptedTermsVersion('2026-04-15');
+        $merchant->setAcceptedTermsAcceptedAt(new \DateTime('2026-04-15T10:15:00Z'));
         $merchant->setSubscriptionStatus('trial');
         $merchant->setTrialEndsAt((new \DateTimeImmutable())->modify('+30 days'));
         $merchant->setUser($user);
