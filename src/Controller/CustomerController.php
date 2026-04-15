@@ -20,38 +20,122 @@ class CustomerController extends AbstractController
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
-    public function create(Request $request): JsonResponse
+    public function create(): JsonResponse
     {
         $user = $this->getUser();
         if (!$user) {
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
-        if (!$merchant) {
-            return new JsonResponse(['error' => 'Merchant not found for user'], 404);
+        return new JsonResponse([
+            'error' => 'manual_customer_creation_disabled',
+            'message' => 'Customer signup is available only via Google auth with merchant_ref QR flow.',
+        ], 403);
+    }
+
+    #[Route('/api/customers/me/bootstrap', name: 'get_customer_bootstrap', methods: ['GET'])]
+    public function meBootstrap(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $data = json_decode($request->getContent(), true);
-        if (!isset($data['name']) || !isset($data['email'])) {
-            return new JsonResponse(['error' => 'name and email required'], 400);
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
         }
 
-        $customer = new Customer();
-        $customer->setName($data['name']);
-        $customer->setEmail($data['email']);
-        $customer->setPhone($data['phone'] ?? null);
-        $customer->setMerchant($merchant);
+        $merchants = [];
+        foreach ($customer->getMerchants() as $merchant) {
+            $merchantId = $merchant->getId();
+            if ($merchantId === null) {
+                continue;
+            }
 
-        $this->entityManager->persist($customer);
-        $this->entityManager->flush();
+            $merchants[$merchantId->toRfc4122()] = [
+                'id' => $merchantId->toRfc4122(),
+                'company_name' => $merchant->getCompanyName(),
+                'logo_url' => $merchant->getLogoUrl(),
+                'subscription_status' => $merchant->getSubscriptionStatus(),
+            ];
+        }
+
+        $directMerchant = $customer->getMerchant();
+        if ($directMerchant && $directMerchant->getId()) {
+            $directId = $directMerchant->getId()->toRfc4122();
+            if (!array_key_exists($directId, $merchants)) {
+                $merchants[$directId] = [
+                    'id' => $directId,
+                    'company_name' => $directMerchant->getCompanyName(),
+                    'logo_url' => $directMerchant->getLogoUrl(),
+                    'subscription_status' => $directMerchant->getSubscriptionStatus(),
+                ];
+            }
+        }
 
         return new JsonResponse([
-            'id' => $customer->getId(),
-            'name' => $customer->getName(),
-            'email' => $customer->getEmail(),
-            'phone' => $customer->getPhone(),
-        ], 201);
+            'user' => [
+                'id' => $user->getId(),
+                'email' => $user->getEmail(),
+                'name' => $user->getName(),
+                'roles' => $user->getRoles(),
+            ],
+            'customer' => [
+                'id' => $customer->getId(),
+                'name' => $customer->getName(),
+                'email' => $customer->getEmail(),
+                'phone' => $customer->getPhone(),
+            ],
+            'merchants' => array_values($merchants),
+        ]);
+    }
+
+    #[Route('/api/customers/me/cards', name: 'get_customer_cards', methods: ['GET'])]
+    public function meCards(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $cards = [];
+        foreach ($customer->getLoyaltyCards() as $card) {
+            if (!$card->isVisible()) {
+                continue;
+            }
+
+            $merchant = $card->getMerchant();
+            $merchantId = $merchant?->getId()?->toRfc4122();
+            $walletToken = $card->getWalletToken();
+
+            $cards[] = [
+                'id' => $card->getId(),
+                'wallet_token' => $walletToken,
+                'current_value' => $card->getCurrentValue(),
+                'target_value' => $card->getTargetValue(),
+                'is_completed' => $card->isCompleted(),
+                'wallet_apple_url' => $walletToken ? ('/public/wallet/apple/' . $walletToken) : null,
+                'wallet_google_url' => $walletToken ? ('/public/wallet/google/' . $walletToken) : null,
+                'merchant' => $merchant ? [
+                    'id' => $merchantId,
+                    'company_name' => $merchant->getCompanyName(),
+                    'logo_url' => $merchant->getLogoUrl(),
+                ] : null,
+                'loyalty_program' => $card->getLoyaltyProgram() ? [
+                    'id' => $card->getLoyaltyProgram()->getId(),
+                    'name' => $card->getLoyaltyProgram()->getName(),
+                    'type' => $card->getLoyaltyProgram()->getType()->value,
+                ] : null,
+            ];
+        }
+
+        return new JsonResponse($cards);
     }
 
     #[Route('/api/customers', name: 'get_customers', methods: ['GET'])]

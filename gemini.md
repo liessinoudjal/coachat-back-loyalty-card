@@ -39,6 +39,43 @@ Le paramètre `state` est inclus pour la conformité avec la spécification OAut
 
 **Important :** Contrairement aux applications traditionnelles, cette API ne valide pas le `state` côté serveur car elle est stateless. Le frontend est responsable de la gestion et validation du state selon ses besoins.
 
+#### Payload JWT réel
+
+Le JWT émis par le backend contient les claims standards suivants :
+
+```json
+{
+  "iat": 1776278191,
+  "exp": 1776281791,
+  "roles": ["ROLE_CUSTOMER", "ROLE_USER"],
+  "username": "front-contract@example.com"
+}
+```
+
+**Claims présents :**
+- `iat`
+- `exp`
+- `roles`
+- `username`
+
+**Claims absents :**
+- `id`
+- `name`
+- `customer`
+- `merchant`
+
+**Règles de rôles :**
+- login/signup merchant : `roles` contient au minimum `ROLE_MERCHANT` et `ROLE_USER`
+- login/signup customer : `roles` contient au minimum `ROLE_CUSTOMER` et `ROLE_USER`
+- si un même compte cumule les deux parcours, le JWT peut contenir `ROLE_MERCHANT`, `ROLE_CUSTOMER`, `ROLE_USER`
+
+**Consigne frontend :**
+- pour router rapidement selon le rôle, décoder localement le claim `roles`
+- ne pas attendre `id`, `name`, `customer` ou `merchant` dans le JWT
+- après login :
+  - merchant : appeler `GET /api/merchants/me`
+  - customer : appeler `GET /api/customers/me/bootstrap`
+
 #### 1. Initiate Google Login
 ```
 GET /api/auth/google?redirect_uri=<frontend_callback_url>
@@ -97,6 +134,81 @@ POST /api/auth/google/callback
 - `400` : `code` ou `redirect_uri` manquant
 - `401` : Code invalide ou expiré
 - `500` : Erreur lors de l'échange du code avec Google
+
+#### 2.b Customer Google Login (QR / merchant_ref requis)
+```
+GET /api/auth/customer/google?redirect_uri=<frontend_callback_url>&merchant_ref=<merchant_uuid>
+POST /api/auth/customer/google/callback
+```
+
+Ce flow est dédié aux customers et ne fonctionne qu'avec un `merchant_ref` valide (QR).
+
+**Body callback :**
+```json
+{
+  "code": "authorization_code_from_google",
+  "state": "optional_state_from_step_1",
+  "redirect_uri": "http://localhost:5173/auth/callback",
+  "merchant_ref": "uuid-merchant"
+}
+```
+
+**Contrat exact GET `/api/auth/customer/google` :**
+- Paramètres query requis :
+  - `redirect_uri` (string)
+  - `merchant_ref` (string UUID v4/v7 du merchant)
+- Réponse 200 :
+```json
+{
+  "redirectUrl": "https://accounts.google.com/oauth/authorize?...",
+  "state": "random_state_string_for_csrf_protection",
+  "merchant_ref": "uuid-merchant"
+}
+```
+
+**Contrat exact POST `/api/auth/customer/google/callback` :**
+- Champs requis : `code`, `redirect_uri`, `merchant_ref`
+- Champ accepté mais non validé côté backend : `state`
+- `merchant_ref` attendu : UUID du merchant (format RFC4122)
+
+**Format de réponse callback customer :**
+- Même base que merchant (`token`, `refresh_token`, `user`) + bloc `customer`
+```json
+{
+  "token": "jwt_token_here",
+  "refresh_token": "refresh_token_here",
+  "user": {
+    "id": 10,
+    "email": "customer@example.com",
+    "name": "Customer Name"
+  },
+  "customer": {
+    "id": 42,
+    "email": "customer@example.com",
+    "name": "Customer Name",
+    "merchant_ref": "uuid-merchant"
+  }
+}
+```
+
+**Erreurs métier stables :**
+- `422` : `merchant_ref_missing`
+- `422` : `merchant_ref_invalid`
+- `422` : `merchant_ref_inactive`
+
+**Matrice erreurs customer auth :**
+- `400` + `redirect_uri required` (GET) si `redirect_uri` absent
+- `400` + `code and redirect_uri required` (POST callback) si `code` ou `redirect_uri` absent
+- `422` + `merchant_ref_missing` si `merchant_ref` absent/vidé
+- `422` + `merchant_ref_invalid` si UUID invalide ou merchant inexistant
+- `422` + `merchant_ref_inactive` si merchant existe mais `subscription_status = canceled`
+- `400` + `Authentication failed: ...` si échange Google KO
+
+**Comportement :**
+- Crée/met à jour un `User` Google sans doublon (googleId/email)
+- Attribue le rôle `ROLE_CUSTOMER`
+- Crée/relie le `Customer` au `User` sans doublon (priorité : `customer.user`, fallback `customer.email` si `user` manquant)
+- Lie le customer au merchant via relation multi-marchands
 
 #### 3. Get User Profile
 ```
@@ -1498,34 +1610,99 @@ Retourne un client par son ID si le client appartient au merchant courant.
 POST /api/customers
 ```
 
-Crée un nouveau client.
+Création manuelle désactivée. L'onboarding customer doit passer par OAuth Google customer avec `merchant_ref` (scan QR).
 
 **Headers :**
 - `Authorization: Bearer <token>`
 
-**Body :**
+**Réponse :**
 ```json
 {
-  "name": "John Doe",
-  "email": "john@example.com",
-  "phone": "+1234567890"
+  "error": "manual_customer_creation_disabled",
+  "message": "Customer signup is available only via Google auth with merchant_ref QR flow."
 }
 ```
 
-**Paramètres :**
-- `name` (requis) : Nom du client
-- `email` (requis) : Email du client
-- `phone` (optionnel) : Numéro de téléphone
+**Code HTTP :** `403`
+
+### Customer Bootstrap (post-login customer)
+```
+GET /api/customers/me/bootstrap
+```
+
+Retourne le profil customer + user + merchants associés pour l'onboarding/dashboard.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis)
 
 **Réponse :**
 ```json
 {
-  "id": 1,
-  "name": "John Doe",
-  "email": "john@example.com",
-  "phone": "+1234567890"
+  "user": {
+    "id": 10,
+    "email": "customer@example.com",
+    "name": "Customer Name",
+    "roles": ["ROLE_USER", "ROLE_CUSTOMER"]
+  },
+  "customer": {
+    "id": 42,
+    "name": "Customer Name",
+    "email": "customer@example.com",
+    "phone": null
+  },
+  "merchants": [
+    {
+      "id": "uuid-merchant",
+      "company_name": "Shop A",
+      "logo_url": null,
+      "subscription_status": "active"
+    }
+  ]
 }
 ```
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Customer not found for user`
+
+### Customer Cards Multi-Merchant
+```
+GET /api/customers/me/cards
+```
+
+Retourne une liste **plate** des cartes du customer, chaque carte embarque son merchant.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis)
+
+**Réponse :**
+```json
+[
+  {
+    "id": 101,
+    "wallet_token": "uuid-wallet-token",
+    "current_value": 12,
+    "target_value": 50,
+    "is_completed": false,
+    "wallet_apple_url": "/public/wallet/apple/uuid-wallet-token",
+    "wallet_google_url": "/public/wallet/google/uuid-wallet-token",
+    "merchant": {
+      "id": "uuid-merchant",
+      "company_name": "Shop A",
+      "logo_url": null
+    },
+    "loyalty_program": {
+      "id": 3,
+      "name": "Programme Points",
+      "type": "points"
+    }
+  }
+]
+```
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Customer not found for user`
 
 ### Update Customer
 ```
@@ -1653,6 +1830,8 @@ Merchant (1) -- (*) Transaction
 LoyaltyProgram (1) -- (*) LoyaltyCard
 LoyaltyCard (1) -- (*) Transaction
 Customer (1) -- (*) LoyaltyCard
+User (1) -- (0..1) Customer
+Customer (*) -- (*) Merchant (customer_merchants)
 ```
 
 ## Getting Started

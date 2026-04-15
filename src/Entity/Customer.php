@@ -28,6 +28,17 @@ class Customer
     #[ORM\JoinColumn(nullable: true)]
     private ?Merchant $merchant = null;
 
+    #[ORM\OneToOne(inversedBy: 'customer')]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?User $user = null;
+
+    /**
+     * @var Collection<int, Merchant>
+     */
+    #[ORM\ManyToMany(targetEntity: Merchant::class)]
+    #[ORM\JoinTable(name: 'customer_merchants')]
+    private Collection $merchants;
+
     #[ORM\OneToMany(targetEntity: LoyaltyCard::class, mappedBy: 'customer')]
     private Collection $loyaltyCards;
 
@@ -38,6 +49,7 @@ class Customer
     {
         $this->loyaltyCards = new ArrayCollection();
         $this->rewards = new ArrayCollection();
+        $this->merchants = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -89,6 +101,55 @@ class Customer
     public function setMerchant(?Merchant $merchant): static
     {
         $this->merchant = $merchant;
+
+        return $this;
+    }
+
+    public function getUser(): ?User
+    {
+        return $this->user;
+    }
+
+    public function setUser(?User $user): static
+    {
+        if ($this->user === $user) {
+            return $this;
+        }
+
+        $previousUser = $this->user;
+        $this->user = $user;
+
+        if ($previousUser !== null && $previousUser->getCustomer() === $this) {
+            $previousUser->setCustomer(null);
+        }
+
+        if ($user !== null && $user->getCustomer() !== $this) {
+            $user->setCustomer($this);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Merchant>
+     */
+    public function getMerchants(): Collection
+    {
+        return $this->merchants;
+    }
+
+    public function addMerchant(Merchant $merchant): static
+    {
+        if (!$this->merchants->contains($merchant)) {
+            $this->merchants->add($merchant);
+        }
+
+        return $this;
+    }
+
+    public function removeMerchant(Merchant $merchant): static
+    {
+        $this->merchants->removeElement($merchant);
 
         return $this;
     }

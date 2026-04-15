@@ -248,6 +248,32 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertSame('Unauthorized', $payload['error']);
     }
 
+    public function testManualCustomerCreationIsDisabled(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('merchant-manual-create-disabled');
+        $this->createMerchant($user, 'Shop Manual Disabled');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/customers',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'name' => 'Blocked Creation',
+                'email' => 'blocked@example.com',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(403);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('manual_customer_creation_disabled', $payload['error']);
+    }
+
     public function testMerchantCannotUpdateOtherMerchantCustomer(): void
     {
         $client = static::createClient();

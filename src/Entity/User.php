@@ -33,6 +33,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\OneToOne(mappedBy: 'user', cascade: ['persist', 'remove'])]
     private ?Merchant $merchant = null;
 
+    #[ORM\OneToOne(mappedBy: 'user', cascade: ['persist'])]
+    private ?Customer $customer = null;
+
     #[ORM\OneToMany(targetEntity: RefreshToken::class, mappedBy: 'user', orphanRemoval: true)]
     private Collection $refreshTokens;
 
@@ -112,6 +115,31 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         }
 
         $this->merchant = $merchant;
+
+        return $this;
+    }
+
+    public function getCustomer(): ?Customer
+    {
+        return $this->customer;
+    }
+
+    public function setCustomer(?Customer $customer): static
+    {
+        if ($this->customer === $customer) {
+            return $this;
+        }
+
+        $previousCustomer = $this->customer;
+        $this->customer = $customer;
+
+        if ($previousCustomer !== null && $previousCustomer->getUser() === $this) {
+            $previousCustomer->setUser(null);
+        }
+
+        if ($customer !== null && $customer->getUser() !== $this) {
+            $customer->setUser($this);
+        }
 
         return $this;
     }
