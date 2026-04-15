@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
+use App\Entity\Reward;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -136,6 +137,57 @@ class CustomerController extends AbstractController
         }
 
         return new JsonResponse($cards);
+    }
+
+    #[Route('/api/customers/me/rewards', name: 'get_customer_rewards', methods: ['GET'])]
+    public function meRewards(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $rewards = $this->entityManager->getRepository(Reward::class)
+            ->createQueryBuilder('r')
+            ->leftJoin('r.loyaltyCard', 'lc')->addSelect('lc')
+            ->leftJoin('r.merchant', 'm')->addSelect('m')
+            ->leftJoin('r.loyaltyProgram', 'lp')->addSelect('lp')
+            ->andWhere('r.customer = :customer')
+            ->setParameter('customer', $customer)
+            ->orderBy('r.generatedAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+
+        $payload = array_map(static function (Reward $reward): array {
+            return [
+                'id' => (string) $reward->getId(),
+                'loyalty_card_id' => $reward->getLoyaltyCard()?->getId(),
+                'merchant_id' => $reward->getMerchant()?->getId()?->toRfc4122(),
+                'wallet_token' => $reward->getLoyaltyCard()?->getWalletToken(),
+                'reward_description' => $reward->getRewardDescription(),
+                'status' => $reward->getStatus()->value,
+                'generated_at' => $reward->getGeneratedAt()?->format(DATE_ATOM),
+                'claimed_at' => $reward->getClaimedAt()?->format(DATE_ATOM),
+                'claim_qr_token' => $reward->getClaimQrToken(),
+                'merchant' => $reward->getMerchant() ? [
+                    'id' => $reward->getMerchant()?->getId()?->toRfc4122(),
+                    'company_name' => $reward->getMerchant()?->getCompanyName(),
+                    'logo_url' => $reward->getMerchant()?->getLogoUrl(),
+                ] : null,
+                'loyalty_program' => $reward->getLoyaltyProgram() ? [
+                    'id' => $reward->getLoyaltyProgram()?->getId(),
+                    'name' => $reward->getLoyaltyProgram()?->getName(),
+                    'type' => $reward->getLoyaltyProgram()?->getType()->value,
+                ] : null,
+            ];
+        }, $rewards);
+
+        return new JsonResponse($payload);
     }
 
     #[Route('/api/customers', name: 'get_customers', methods: ['GET'])]

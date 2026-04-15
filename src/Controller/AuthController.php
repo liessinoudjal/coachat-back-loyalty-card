@@ -90,6 +90,15 @@ class AuthController extends AbstractController
             $googleUser = $client->fetchUserFromToken($accessToken);
 
             $user = $this->upsertGoogleUser($googleUser);
+
+            // Keep merchant and customer login flows isolated to avoid accidental role merge.
+            if ($user->getCustomer() !== null && $user->getMerchant() === null) {
+                return new JsonResponse([
+                    'error' => 'account_already_customer',
+                    'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
+                ], 409);
+            }
+
             $this->ensureUserRole($user, 'ROLE_MERCHANT');
 
             $this->entityManager->persist($user);
@@ -177,6 +186,15 @@ class AuthController extends AbstractController
             $googleUser = $client->fetchUserFromToken($accessToken);
 
             $user = $this->upsertGoogleUser($googleUser);
+
+            // Keep merchant and customer login flows isolated to avoid accidental role merge.
+            if ($user->getMerchant() !== null && $user->getCustomer() === null) {
+                return new JsonResponse([
+                    'error' => 'account_already_merchant',
+                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
+                ], 409);
+            }
+
             $this->ensureUserRole($user, 'ROLE_CUSTOMER');
 
             $customerRepository = $this->entityManager->getRepository(Customer::class);

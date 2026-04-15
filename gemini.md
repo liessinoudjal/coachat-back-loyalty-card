@@ -7,7 +7,8 @@ Cette API Symfony fournit un système complet de gestion de cartes de fidélité
 - Authentification via Google OAuth2 + JWT
 - Gestion des commerçants, programmes de fidélité, cartes, transactions, clients
 - Rewards (récompenses) réclamables via QR code
-- **Customer Portal** : accès temporaire sécurisé pour les clients non authentifiés JWT, via `portal_token` court TTL issu d'un wallet token
+- Parcours customer authentifié (Google OAuth customer + dashboard multi-marchands)
+- Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `GET /api/customers/me/rewards`
 
 L'API utilise JWT pour l'authentification des marchands et API Platform pour la gestion des ressources.
 
@@ -776,35 +777,6 @@ Retourne toutes les cartes de fidélité d'un commerçant.
 ]
 ```
 
-### Get Loyalty Card by Token
-```
-GET /api/loyalty_cards/by-token/{walletToken}
-```
-
-Retourne une carte de fidélité par son `wallet_token` (UUID v4).
-
-**Headers :**
-- Aucun header d'authentification requis (endpoint public).
-
-**Comportement d'accès :**
-- Utilisateur non connecté : accès autorisé avec payload public (pas d'email customer).
-- Merchant propriétaire connecté : payload complet.
-
-**Payload merchant retourné (public et privé) :**
-```json
-{
-  "merchant": {
-    "id": "...",
-    "company_name": "Cafe du Centre",
-    "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
-    "phone": "01 23 45 67 89",
-    "address": "123 rue de la Paix, 75000 Paris",
-    "postal_code": "75000",
-    "city": "Paris"
-  }
-}
-```
-
 ### Create Loyalty Card
 ```
 POST /api/loyalty_cards
@@ -862,6 +834,10 @@ PATCH /api/loyalty_cards/{id}
 ```
 
 Met à jour une carte de fidélité.
+
+**Comportement reward (important) :**
+- Si `is_completed` passe de `false` à `true` et qu'un customer est rattaché à la carte, une reward est créée automatiquement.
+- Le comportement est idempotent (pas de duplication de reward pour une même carte).
 
 **Headers :**
 - `Authorization: Bearer <token>`
@@ -1136,8 +1112,10 @@ Filtres supportés :
 - `status` (`PENDING`, `CLAIMED`, `CANCELLED`, `EXPIRED`)
 
 Notes sécurité :
-- Si authentifié merchant : retour limité au merchant connecté.
-- En lookup public (`customer_email`/`wallet_token`) : payload réduit et rate-limité.
+- JWT merchant requis (pas de lookup public).
+- Retour strictement limité au merchant connecté.
+- Si `merchant` est fourni et ne correspond pas au merchant du JWT : `403 Forbidden`.
+- Sans JWT valide : `401 Unauthorized`.
 
 ### Generate From Completion (idempotent)
 
@@ -1359,114 +1337,24 @@ Endpoint qui reçoit les webhooks Stripe (à configurer dans Stripe Dashboard).
 
 ---
 
-## Customer Portal (Portail Client Public)
+## Decommission Legacy Claim/Public Portal
 
-Accès temporaire et sécurisé pour un client non authentifié JWT. Basé sur un `portal_token` opaque, court TTL, hash HMAC-SHA256 en base.
+Le module public legacy de claim customer a été retiré du backend.
 
-### Sécurité
-- Token opaque : `pt_live_` + 64 hex (256 bits d'entropie, `random_bytes(32)`)
-- Stockage : HMAC-SHA256(token, APP_SECRET) — jamais en clair
-- TTL : 15 min, refreshable jusqu'à 24h cumulées (fenêtre glissante)
-- Rate limiting : 10 req/min bootstrap (IP), 60 req/min overview (token hash)
-- Aucun accès par `customer_id` ou email seul côté public
+**Supprimé :**
+- `GET /api/loyalty_cards/by-token/{walletToken}`
+- `POST /api/public/customer-portal/bootstrap`
+- `GET /api/public/customer-portal/overview`
+- `POST /api/public/customer-portal/refresh`
+- `POST /api/public/customer-portal/revoke`
+- les codes métier `PORTAL_TOKEN_*` et `CLAIM_WALLET_TOKEN_INVALID`
 
-### Entité CustomerPortalSession
+**Parcours supporté :**
+- customer authentifié uniquement via OAuth Google customer
+- bootstrap dashboard via `GET /api/customers/me/bootstrap`
+- cartes customer via `GET /api/customers/me/cards`
+- rewards customer via `GET /api/customers/me/rewards`
 
-| Champ | Type | Description |
-|-------|------|-------------|
-| `id` | UUID v4 | PK |
-| `customer` | ManyToOne Customer | Customer lié |
-| `token_hash` | VARCHAR(64) UNIQUE | HMAC-SHA256 du token brut |
-| `issued_from_wallet_token` | VARCHAR(36) | Wallet token source (audit) |
-| `issued_at` | datetime_immutable | Émission |
-| `original_issued_at` | datetime_immutable nullable | Préservé sur refresh pour fenêtre 24h |
-| `expires_at` | datetime_immutable | Expiration |
-| `revoked_at` | datetime_immutable nullable | Révocation explicite |
-| `last_used_at` | datetime_immutable nullable | Dernière activité |
-| `ip` | VARCHAR(45) nullable | IPv4/v6 pour audit |
-| `user_agent` | VARCHAR(512) nullable | UA pour audit |
-| `scope` | VARCHAR(255) | `cards:read rewards:read` |
-
-### Endpoints
-
-#### POST /api/public/customer-portal/bootstrap
-Émet un portal_token depuis un wallet_token valide.
-
-**Body :**
-```json
-{ "wallet_token": "wallet-token-source" }
-```
-
-**Réponse 200 :**
-```json
-{
-  "portal_token": "pt_live_xxxxxxxxx",
-  "token_type": "Bearer",
-  "expires_at": "2026-04-08T12:30:00+00:00",
-  "customer": { "id": 42, "name": "Jane Doe" }
-}
-```
-
-**Erreurs :** 400 wallet_token manquant, 404 wallet_token inconnu, 410 carte sans customer, 429 rate limit
-
----
-
-#### GET /api/public/customer-portal/overview
-Vue consolidée cartes + rewards du customer. Nécessite `Authorization: Bearer <portal_token>`.
-
-**Query params :** `include=cards,rewards` `status=PENDING` `page=1` `itemsPerPage=20`
-
-**Réponse 200 :**
-```json
-{
-  "customer": { "id": 42, "name": "Jane Doe" },
-  "cards": [...],
-  "rewards": [...],
-  "meta": { "cards_count": 3, "rewards_count": 2 }
-}
-```
-
-**Erreurs :** 401 token invalide/révoqué/expiré, 429 rate limit
-
----
-
-#### POST /api/public/customer-portal/refresh
-Rotation de token : révoque l'ancien et en émet un nouveau. Nécessite `Authorization: Bearer <portal_token>`.
-
-**Réponse 200 :**
-```json
-{ "portal_token": "pt_live_new_xxxxx", "token_type": "Bearer", "expires_at": "..." }
-```
-
-**Erreurs :** 401 token invalide, 403 fenêtre 24h dépassée
-
----
-
-#### POST /api/public/customer-portal/revoke
-Logout public — invalide la session courante. Réponse 204 No Content.
-
----
-
-### Codes d'erreur JSON (format standard)
-
-| Code | HTTP | Signification |
-|------|------|---------------|
-| `PORTAL_TOKEN_INVALID` | 401 | Token absent, malformé ou inconnu |
-| `PORTAL_TOKEN_EXPIRED` | 401 | Session expirée |
-| `PORTAL_TOKEN_REVOKED` | 401 | Session révoquée explicitement |
-| `CLAIM_WALLET_TOKEN_INVALID` | 404/410 | Wallet token inconnu ou carte sans customer |
-| `RATE_LIMITED` | 429 | Trop de requêtes |
-
-### Flow côté Front
-
-1. Depuis la page claim (wallet_token connu) → `POST /bootstrap`
-2. Stocker `portal_token` en `sessionStorage` (pas `localStorage`)
-3. `GET /overview` pour afficher cartes et rewards
-4. Si 401 avec code `PORTAL_TOKEN_EXPIRED` ou `PORTAL_TOKEN_REVOKED` → forcer retour au flux claim
-5. `POST /refresh` avant expiration si session prolongée nécessaire
-
-### Migration
-Table `customer_portal_session` créée dans `Version20260409000001`.
 3. Backend résout le Stripe Price ID depuis la BDD (non exposé)
 4. Backend crée/récupère le customer Stripe et crée une session Checkout
 5. Frontend redirige vers `checkoutUrl`
@@ -1703,6 +1591,47 @@ Retourne une liste **plate** des cartes du customer, chaque carte embarque son m
 **Erreurs :**
 - `401` : `Unauthorized`
 - `404` : `Customer not found for user`
+
+### Customer Rewards Multi-Merchant
+```
+GET /api/customers/me/rewards
+```
+
+Retourne les rewards du customer authentifié, triées par `generated_at` décroissant.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis, token customer)
+
+**Réponse :**
+```json
+[
+  {
+    "id": "uuid-reward",
+    "loyalty_card_id": 101,
+    "merchant_id": "uuid-merchant",
+    "wallet_token": "uuid-wallet-token",
+    "reward_description": "1 café offert",
+    "status": "PENDING",
+    "generated_at": "2026-04-16T09:15:00+00:00",
+    "claimed_at": null,
+    "claim_qr_token": "token-unique",
+    "merchant": {
+      "id": "uuid-merchant",
+      "company_name": "Shop A",
+      "logo_url": null
+    },
+    "loyalty_program": {
+      "id": 3,
+      "name": "Programme Points",
+      "type": "POINTS"
+    }
+  }
+]
+```
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Customer not found for user` (ex: token merchant utilisé sur cet endpoint)
 
 ### Update Customer
 ```

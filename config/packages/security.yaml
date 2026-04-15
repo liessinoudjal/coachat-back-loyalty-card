@@ -24,11 +24,6 @@ security:
         public:
             pattern: ^/public/
             security: false
-        # Customer portal: no JWT — token validation is handled in the controller
-        customer_portal:
-            pattern: ^/api/public/customer-portal
-            stateless: true
-            security: false
         api:
             pattern: ^/api
             stateless: true
@@ -51,11 +46,8 @@ security:
         - { path: ^/api/auth/customer/google/callback$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/refresh$, roles: PUBLIC_ACCESS }
         - { path: ^/api/legal/terms/current-version, roles: PUBLIC_ACCESS }
-        - { path: ^/api/public/customer-portal, roles: PUBLIC_ACCESS }
-        - { path: ^/api/loyalty_cards/by-token, roles: PUBLIC_ACCESS, methods: [GET] }
         - { path: ^/api/plans, roles: PUBLIC_ACCESS }
         - { path: ^/api/subscription/webhook, roles: PUBLIC_ACCESS }
-        - { path: ^/api/rewards$, roles: PUBLIC_ACCESS, methods: [GET] }
         # - { path: ^/admin, roles: ROLE_ADMIN }
         # - { path: ^/profile, roles: ROLE_USER }
 

@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\LoyaltyProgram;
+use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,6 +18,7 @@ class LoyaltyCardController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly string $appBaseUrl,
+        private readonly RewardService $rewardService,
     ) {}
 
     private function formatCard(LoyaltyCard $card): array
@@ -83,57 +85,6 @@ class LoyaltyCardController extends AbstractController
         return new JsonResponse($data);
     }
 
-    #[Route('/api/loyalty_cards/by-token/{walletToken}', name: 'get_loyalty_card_by_token', methods: ['GET'])]
-    public function getByToken(string $walletToken): JsonResponse
-    {
-        $card = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy(['walletToken' => $walletToken]);
-        if (!$card || !$card->isVisible()) {
-            return new JsonResponse(['error' => 'Card not found'], 404);
-        }
-
-        $user = $this->getUser();
-        if ($user && $card->getMerchant()->getUser() === $user) {
-            return new JsonResponse($this->formatCard($card));
-        }
-
-        return new JsonResponse($this->formatPublicCard($card));
-
-    }
-
-    private function formatPublicCard(LoyaltyCard $card): array
-    {
-        $walletToken = $card->getWalletToken();
-
-        return [
-            'id' => $card->getId(),
-            'wallet_token' => $walletToken,
-            'current_value' => $card->getCurrentValue(),
-            'target_value' => $card->getTargetValue(),
-            'is_completed' => $card->isCompleted(),
-            'wallet_apple_url' => $this->appBaseUrl . '/public/wallet/apple/' . $walletToken,
-            'wallet_google_url' => $this->appBaseUrl . '/public/wallet/google/' . $walletToken,
-            'loyalty_program' => [
-                'id' => $card->getLoyaltyProgram()->getId(),
-                'name' => $card->getLoyaltyProgram()->getName(),
-                'type' => $card->getLoyaltyProgram()->getType()->value,
-            ],
-            'customer' => $card->getCustomer() ? [
-                'id' => $card->getCustomer()->getId(),
-                'name' => $card->getCustomer()->getName(),
-            ] : null,
-            'merchant' => $card->getMerchant() ? [
-                'id' => $card->getMerchant()->getId(),
-                'company_name' => $card->getMerchant()->getCompanyName(),
-                'logo_url' => $card->getMerchant()->getLogoUrl(),
-                'phone' => $card->getMerchant()->getPhone(),
-                'address' => $card->getMerchant()->getAddress(),
-                'postal_code' => $card->getMerchant()->getPostalCode(),
-                'city' => $card->getMerchant()->getCity(),
-            ] : null,
-        ];
-
-    }
-
     #[Route('/api/loyalty_cards', name: 'create_loyalty_card', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -190,6 +141,8 @@ class LoyaltyCardController extends AbstractController
         }
 
         $data = json_decode($request->getContent(), true);
+        $wasCompleted = $card->isCompleted();
+
         if (isset($data['current_value'])) {
             $card->setCurrentValue($data['current_value']);
         }
@@ -198,6 +151,10 @@ class LoyaltyCardController extends AbstractController
         }
         if (isset($data['is_completed'])) {
             $card->setIsCompleted($data['is_completed']);
+        }
+
+        if (!$wasCompleted && $card->isCompleted() && $card->getCustomer() !== null) {
+            $this->rewardService->createRewardFromCompletion($card);
         }
 
         $this->entityManager->flush();

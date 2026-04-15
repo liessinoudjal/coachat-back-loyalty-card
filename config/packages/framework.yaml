@@ -1,21 +1,6 @@
 # see https://symfony.com/doc/current/reference/configuration/framework.html
 framework:
     secret: '%env(APP_SECRET)%'
-    rate_limiter:
-        reward_public_lookup:
-            policy: 'fixed_window'
-            limit: 30
-            interval: '1 minute'
-        # Bootstrap: strict limit per IP to prevent wallet token enumeration
-        portal_bootstrap:
-            policy: 'sliding_window'
-            limit: 10
-            interval: '1 minute'
-        # Overview/read: generous limit keyed on session token hash
-        portal_lookup:
-            policy: 'fixed_window'
-            limit: 60
-            interval: '1 minute'
 
     # Note that the session will be started ONLY if you read or write from it.
     session: true

@@ -4,11 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
-use App\Entity\LoyaltyCard;
-use App\Entity\LoyaltyProgram;
 use App\Entity\Merchant;
 use App\Entity\User;
-use App\Enum\LoyaltyProgramType;
 use Doctrine\ORM\EntityManagerInterface;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -418,52 +415,6 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('2026-04-15', $payload['accepted_terms_version']);
         self::assertSame('2026-04-15T10:15:00Z', $payload['accepted_terms_accepted_at']);
         self::assertStringStartsWith('data:image/webp;base64,', $payload['logo_url']);
-    }
-
-    public function testPublicByTokenIncludesMerchantLogoAndProfileFields(): void
-    {
-        $client = static::createClient();
-
-        $user = $this->createUser('public-by-token');
-        $merchant = $this->createMerchant(
-            $user,
-            'Public Shop',
-            '01 99 88 77 66',
-            '88 rue publique',
-            'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxISEhUTEhIVFRUVFRUVFRUVFRUVFRUWFxUWFhUVFRUYHSggGBolHRUVITEhJSkrLi4uFx8zODMsNygtLisBCgoKDg0OGhAQGi0fHR0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAEAAQMBIgACEQEDEQH/xAAXAAEBAQEAAAAAAAAAAAAAAAAAAQID/8QAFhEBAQEAAAAAAAAAAAAAAAAAAAER/8QAFQEBAQAAAAAAAAAAAAAAAAAAAgP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCeAA==',
-            '13001',
-            'Marseille'
-        );
-
-        $program = new LoyaltyProgram();
-        $program->setName('Stamp Program');
-        $program->setType(LoyaltyProgramType::STAMP);
-        $program->setStampTarget(10);
-        $program->setMerchant($merchant);
-
-        $card = new LoyaltyCard();
-        $card->setCurrentValue(5);
-        $card->setTargetValue(10);
-        $card->setLoyaltyProgram($program);
-        $card->setMerchant($merchant);
-
-        $em = $this->getEntityManager();
-        $em->persist($program);
-        $em->persist($card);
-        $em->flush();
-
-        $client->request('GET', '/api/loyalty_cards/by-token/' . $card->getWalletToken());
-
-        self::assertResponseStatusCodeSame(200);
-
-        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
-        self::assertArrayHasKey('merchant', $payload);
-        self::assertSame('Public Shop', $payload['merchant']['company_name']);
-        self::assertSame('01 99 88 77 66', $payload['merchant']['phone']);
-        self::assertSame('88 rue publique', $payload['merchant']['address']);
-        self::assertSame('13001', $payload['merchant']['postal_code']);
-        self::assertSame('Marseille', $payload['merchant']['city']);
-        self::assertStringStartsWith('data:image/jpeg;base64,', $payload['merchant']['logo_url']);
     }
 
     private function createUser(string $suffix): User

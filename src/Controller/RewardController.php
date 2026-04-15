@@ -8,11 +8,9 @@ use App\Entity\Reward;
 use App\Enum\RewardStatus;
 use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Annotation\Route;
 
 class RewardController extends AbstractController
@@ -20,8 +18,6 @@ class RewardController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RewardService $rewardService,
-        #[Autowire(service: 'limiter.reward_public_lookup')]
-        private readonly RateLimiterFactory $rewardPublicLookupLimiter,
     ) {}
 
     #[Route('/api/rewards', name: 'get_rewards', methods: ['GET'])]
@@ -45,30 +41,20 @@ class RewardController extends AbstractController
         $walletToken = $request->query->get('wallet_token');
         $statusFilter = $request->query->get('status');
 
-        if ($user) {
-            $merchant = $user->getMerchant();
-            if (!$merchant instanceof Merchant) {
-                return new JsonResponse(['error' => 'Merchant not found'], 404);
-            }
-
-            if ($merchantFilter && $merchantFilter !== (string) $merchant->getId()) {
-                return new JsonResponse(['error' => 'Forbidden'], 403);
-            }
-
-            $qb->andWhere('r.merchant = :merchant')->setParameter('merchant', $merchant);
-        } else {
-            $rateLimit = $this->rewardPublicLookupLimiter
-                ->create($request->getClientIp() ?? 'unknown')
-                ->consume(1);
-
-            if (!$rateLimit->isAccepted()) {
-                return new JsonResponse(['error' => 'Too many requests'], 429);
-            }
-
-            if (!$customerEmail && !$walletToken) {
-                return new JsonResponse(['error' => 'Unauthorized'], 401);
-            }
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
+
+        $merchant = $user->getMerchant();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        if ($merchantFilter && $merchantFilter !== (string) $merchant->getId()) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $qb->andWhere('r.merchant = :merchant')->setParameter('merchant', $merchant);
 
         if ($merchantFilter && $user) {
             $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantFilter);
@@ -103,8 +89,7 @@ class RewardController extends AbstractController
             ->getQuery()
             ->getResult();
 
-        $isPublicLookup = !$user;
-        $items = array_map(fn(Reward $reward) => $this->formatReward($reward, !$isPublicLookup), $rewards);
+        $items = array_map(fn(Reward $reward) => $this->formatReward($reward, true), $rewards);
 
         return new JsonResponse([
             'items' => $items,
