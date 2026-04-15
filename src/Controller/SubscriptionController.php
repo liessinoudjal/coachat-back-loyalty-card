@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Merchant;
 use App\Repository\PlanRepository;
+use App\Service\StripeSubscriptionPeriodService;
 use Doctrine\ORM\EntityManagerInterface;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
@@ -17,6 +18,7 @@ class SubscriptionController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PlanRepository $planRepository,
+        private readonly StripeSubscriptionPeriodService $stripeSubscriptionPeriodService,
     ) {
     }
 
@@ -79,10 +81,22 @@ class SubscriptionController extends AbstractController
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
         $plan = $merchant->getPlan();
+        $subscriptionPeriod = [
+            'current_period_start' => $this->formatUtcDateTime($merchant->getCurrentPeriodStartAt()),
+            'current_period_end' => $this->formatUtcDateTime($merchant->getCurrentPeriodEndAt()),
+        ];
+
+        if ($subscriptionPeriod['current_period_start'] === null || $subscriptionPeriod['current_period_end'] === null) {
+            $stripePeriod = $this->stripeSubscriptionPeriodService->getCurrentPeriod($merchant);
+            $subscriptionPeriod['current_period_start'] = $subscriptionPeriod['current_period_start'] ?? $stripePeriod['current_period_start'];
+            $subscriptionPeriod['current_period_end'] = $subscriptionPeriod['current_period_end'] ?? $stripePeriod['current_period_end'];
+        }
 
         return new JsonResponse([
             'subscription_status' => $merchant->getSubscriptionStatus(),
             'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
+            'current_period_start' => $subscriptionPeriod['current_period_start'],
+            'current_period_end' => $subscriptionPeriod['current_period_end'],
             'plan' => $plan ? [
                 'id' => $plan->getId(),
                 'slug' => $plan->getSlug(),
@@ -157,6 +171,8 @@ class SubscriptionController extends AbstractController
         $merchant = $this->entityManager->getRepository(Merchant::class)->findOneBy(['stripeCustomerId' => $subscription->customer]);
         if (!$merchant) return;
 
+        $this->backfillCurrentPeriodDatesIfMissing($merchant, $subscription);
+
         if ($subscription->cancel_at !== null) {
             // Cancellation scheduled at end of billing period
             $merchant->setSubscriptionStatus('canceling');
@@ -171,6 +187,9 @@ class SubscriptionController extends AbstractController
     {
         $merchant = $this->entityManager->getRepository(Merchant::class)->findOneBy(['stripeCustomerId' => $subscription->customer]);
         if (!$merchant) return;
+
+        $this->backfillCurrentPeriodDatesIfMissing($merchant, $subscription);
+
         $freePlan = $this->planRepository->findBySlug('free');
         if ($freePlan) $merchant->setPlan($freePlan);
         $merchant->setSubscriptionStatus('canceled');
@@ -183,5 +202,39 @@ class SubscriptionController extends AbstractController
         if (!$merchant) return;
         $merchant->setSubscriptionStatus('suspended');
         $this->entityManager->flush();
+    }
+
+    private function backfillCurrentPeriodDatesIfMissing(Merchant $merchant, object $subscription): void
+    {
+        if ($merchant->getCurrentPeriodStartAt() === null) {
+            $startTimestamp = $subscription->current_period_start ?? $subscription->start_date ?? null;
+            $merchant->setCurrentPeriodStartAt($this->timestampToUtcDateTime($startTimestamp));
+        }
+
+        if ($merchant->getCurrentPeriodEndAt() === null) {
+            $endTimestamp = $subscription->current_period_end ?? $subscription->cancel_at ?? null;
+            $merchant->setCurrentPeriodEndAt($this->timestampToUtcDateTime($endTimestamp));
+        }
+    }
+
+    private function timestampToUtcDateTime(mixed $timestamp): ?\DateTime
+    {
+        if ($timestamp === null || !is_numeric($timestamp)) {
+            return null;
+        }
+
+        $date = new \DateTime('@' . (string) ((int) $timestamp));
+        $date->setTimezone(new \DateTimeZone('UTC'));
+
+        return $date;
+    }
+
+    private function formatUtcDateTime(?\DateTimeInterface $dateTime): ?string
+    {
+        if ($dateTime === null) {
+            return null;
+        }
+
+        return (clone $dateTime)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
     }
 }

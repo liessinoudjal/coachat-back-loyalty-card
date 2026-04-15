@@ -46,6 +46,12 @@ class Merchant
     #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
     private ?\DateTimeInterface $trialEndsAt = null;
 
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    private ?\DateTimeInterface $currentPeriodStartAt = null;
+
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    private ?\DateTimeInterface $currentPeriodEndAt = null;
+
     #[ORM\Column(length: 50)]
     private string $subscriptionStatus = 'trial';
 
@@ -193,9 +199,46 @@ class Merchant
 
     public function setTrialEndsAt(?\DateTimeInterface $trialEndsAt): static
     {
-        $this->trialEndsAt = $trialEndsAt;
+        $this->trialEndsAt = $this->toMutableDateTime($trialEndsAt);
 
         return $this;
+    }
+
+    public function getCurrentPeriodStartAt(): ?\DateTimeInterface
+    {
+        return $this->currentPeriodStartAt;
+    }
+
+    public function setCurrentPeriodStartAt(?\DateTimeInterface $currentPeriodStartAt): static
+    {
+        $this->currentPeriodStartAt = $this->toMutableDateTime($currentPeriodStartAt);
+
+        return $this;
+    }
+
+    public function getCurrentPeriodEndAt(): ?\DateTimeInterface
+    {
+        return $this->currentPeriodEndAt;
+    }
+
+    public function setCurrentPeriodEndAt(?\DateTimeInterface $currentPeriodEndAt): static
+    {
+        $this->currentPeriodEndAt = $this->toMutableDateTime($currentPeriodEndAt);
+
+        return $this;
+    }
+
+    private function toMutableDateTime(?\DateTimeInterface $dateTime): ?\DateTime
+    {
+        if ($dateTime === null) {
+            return null;
+        }
+
+        if ($dateTime instanceof \DateTime) {
+            return $dateTime;
+        }
+
+        return new \DateTime($dateTime->format('Y-m-d H:i:s'), $dateTime->getTimezone());
     }
 
     public function getSubscriptionStatus(): string
