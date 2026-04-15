@@ -162,6 +162,8 @@ class AuthController extends AbstractController
             'email' => $merchant->getEmail(),
             'phone' => $merchant->getPhone(),
             'address' => $merchant->getAddress(),
+            'postal_code' => $merchant->getPostalCode(),
+            'city' => $merchant->getCity(),
             'logo_url' => $merchant->getLogoUrl(),
             'user' => [
                 'id' => $user->getId(),

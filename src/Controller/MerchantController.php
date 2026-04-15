@@ -67,6 +67,8 @@ class MerchantController extends AbstractController
             'email' => $merchant->getEmail(),
             'phone' => $merchant->getPhone(),
             'address' => $merchant->getAddress(),
+            'postal_code' => $merchant->getPostalCode(),
+            'city' => $merchant->getCity(),
             'logo_url' => $merchant->getLogoUrl(),
             'stripe_customer_id' => $merchant->getStripeCustomerId(),
             'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
@@ -131,12 +133,32 @@ class MerchantController extends AbstractController
         if (array_key_exists('address', $data) && $data['address'] !== null && !is_string($data['address'])) {
             return new JsonResponse(['error' => 'address must be a string or null'], 400);
         }
+        if (!array_key_exists('postal_code', $data)) {
+            return new JsonResponse(['error' => 'postal_code required'], 400);
+        }
+        if (!is_string($data['postal_code']) || trim($data['postal_code']) === '') {
+            return new JsonResponse(['error' => 'postal_code must be a non-empty string'], 400);
+        }
+        if (mb_strlen(trim($data['postal_code'])) > 10) {
+            return new JsonResponse(['error' => 'postal_code must be at most 10 characters'], 400);
+        }
+        if (!array_key_exists('city', $data)) {
+            return new JsonResponse(['error' => 'city required'], 400);
+        }
+        if (!is_string($data['city']) || trim($data['city']) === '') {
+            return new JsonResponse(['error' => 'city must be a non-empty string'], 400);
+        }
+        if (mb_strlen(trim($data['city'])) > 100) {
+            return new JsonResponse(['error' => 'city must be at most 100 characters'], 400);
+        }
 
         $merchant = new Merchant();
         $merchant->setCompanyName(trim($data['company_name']));
         $merchant->setEmail($data['email'] ?? $user->getEmail());
         $merchant->setPhone($data['phone'] ?? null);
         $merchant->setAddress($data['address'] ?? null);
+        $merchant->setPostalCode(trim($data['postal_code']));
+        $merchant->setCity(trim($data['city']));
         $merchant->setLogoUrl(null);
         $merchant->setSubscriptionStatus($data['subscription_status'] ?? 'trial');
 
@@ -205,6 +227,26 @@ class MerchantController extends AbstractController
             }
 
             $merchant->setAddress($data['address']);
+        }
+        if (array_key_exists('postal_code', $data)) {
+            if ($data['postal_code'] !== null && !is_string($data['postal_code'])) {
+                return new JsonResponse(['error' => 'postal_code must be a string or null'], 400);
+            }
+            if (is_string($data['postal_code']) && mb_strlen(trim($data['postal_code'])) > 10) {
+                return new JsonResponse(['error' => 'postal_code must be at most 10 characters'], 400);
+            }
+
+            $merchant->setPostalCode($data['postal_code'] !== null ? trim($data['postal_code']) : null);
+        }
+        if (array_key_exists('city', $data)) {
+            if ($data['city'] !== null && !is_string($data['city'])) {
+                return new JsonResponse(['error' => 'city must be a string or null'], 400);
+            }
+            if (is_string($data['city']) && mb_strlen(trim($data['city'])) > 100) {
+                return new JsonResponse(['error' => 'city must be at most 100 characters'], 400);
+            }
+
+            $merchant->setCity($data['city'] !== null ? trim($data['city']) : null);
         }
         if (isset($data['email'])) {
             $merchant->setEmail($data['email']);

@@ -278,6 +278,8 @@ class CustomerPortalController extends AbstractController
                 'merchant' => $merchant !== null ? [
                     'id'           => (string) $merchant->getId(),
                     'company_name' => $merchant->getCompanyName(),
+                    'postal_code'  => $merchant->getPostalCode(),
+                    'city'         => $merchant->getCity(),
                 ] : null,
             ];
         }, $cards);
@@ -331,6 +333,8 @@ class CustomerPortalController extends AbstractController
                 'merchant' => $merchant !== null ? [
                     'id'           => (string) $merchant->getId(),
                     'company_name' => $merchant->getCompanyName(),
+                    'postal_code'  => $merchant->getPostalCode(),
+                    'city'         => $merchant->getCity(),
                 ] : null,
             ];
         }, $rewards);
