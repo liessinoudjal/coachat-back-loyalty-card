@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
+use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\User;
 use App\Entity\Merchant;
 use App\Service\RefreshTokenService;
@@ -328,6 +329,8 @@ class AuthController extends AbstractController
                 $customer->setMerchant($merchant);
             }
 
+            $this->ensureCustomerMerchantNotificationPreference($customer, $merchant);
+
             $this->entityManager->persist($user);
             $this->entityManager->persist($customer);
             $this->entityManager->flush();
@@ -573,6 +576,26 @@ class AuthController extends AbstractController
         }
 
         return $this->entityManager->getRepository(Merchant::class)->find($merchantId);
+    }
+
+    private function ensureCustomerMerchantNotificationPreference(Customer $customer, Merchant $merchant): void
+    {
+        $preferenceRepository = $this->entityManager->getRepository(CustomerMerchantNotificationPreference::class);
+        $existingPreference = $preferenceRepository->findOneBy([
+            'customer' => $customer,
+            'merchant' => $merchant,
+        ]);
+
+        if ($existingPreference instanceof CustomerMerchantNotificationPreference) {
+            return;
+        }
+
+        $preference = new CustomerMerchantNotificationPreference();
+        $preference->setCustomer($customer);
+        $preference->setMerchant($merchant);
+        $preference->setEnabled(true);
+
+        $this->entityManager->persist($preference);
     }
 
     #[Route('/api/merchants/me', name: 'merchants_me', methods: ['GET'])]

@@ -45,11 +45,15 @@ class Customer
     #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'customer', orphanRemoval: true)]
     private Collection $rewards;
 
+    #[ORM\OneToMany(targetEntity: CustomerMerchantNotificationPreference::class, mappedBy: 'customer', orphanRemoval: true)]
+    private Collection $notificationPreferences;
+
     public function __construct()
     {
         $this->loyaltyCards = new ArrayCollection();
         $this->rewards = new ArrayCollection();
         $this->merchants = new ArrayCollection();
+        $this->notificationPreferences = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -207,6 +211,35 @@ class Customer
         if ($this->rewards->removeElement($reward)) {
             if ($reward->getCustomer() === $this) {
                 $reward->setCustomer(null);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, CustomerMerchantNotificationPreference>
+     */
+    public function getNotificationPreferences(): Collection
+    {
+        return $this->notificationPreferences;
+    }
+
+    public function addNotificationPreference(CustomerMerchantNotificationPreference $notificationPreference): static
+    {
+        if (!$this->notificationPreferences->contains($notificationPreference)) {
+            $this->notificationPreferences->add($notificationPreference);
+            $notificationPreference->setCustomer($this);
+        }
+
+        return $this;
+    }
+
+    public function removeNotificationPreference(CustomerMerchantNotificationPreference $notificationPreference): static
+    {
+        if ($this->notificationPreferences->removeElement($notificationPreference)) {
+            if ($notificationPreference->getCustomer() === $this) {
+                $notificationPreference->setCustomer(null);
             }
         }
 

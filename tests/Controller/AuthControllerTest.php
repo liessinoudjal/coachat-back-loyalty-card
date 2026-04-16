@@ -6,6 +6,7 @@ namespace App\Tests\Controller;
 
 use App\Controller\AuthController;
 use App\Entity\Customer;
+use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
@@ -158,13 +159,18 @@ final class AuthControllerTest extends TestCase
         self::assertNotNull($merchantRef);
 
         $capturedCustomer = null;
+        $capturedPreference = null;
         $entityManager = $this->createEntityManager(
             userRepository: $this->createUserRepository(fn () => null),
             customerRepository: $this->createCustomerRepository(fn () => null),
             merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
-            onPersist: static function (object $entity) use (&$capturedCustomer): void {
+            notificationPreferenceRepository: $this->createNotificationPreferenceRepository(fn () => null),
+            onPersist: static function (object $entity) use (&$capturedCustomer, &$capturedPreference): void {
                 if ($entity instanceof Customer) {
                     $capturedCustomer = $entity;
+                }
+                if ($entity instanceof CustomerMerchantNotificationPreference) {
+                    $capturedPreference = $entity;
                 }
             },
         );
@@ -179,6 +185,10 @@ final class AuthControllerTest extends TestCase
         self::assertNotNull($capturedCustomer);
         self::assertSame($merchant, $capturedCustomer->getMerchant());
         self::assertTrue($capturedCustomer->getMerchants()->contains($merchant));
+        self::assertNotNull($capturedPreference);
+        self::assertTrue($capturedPreference->isEnabled());
+        self::assertSame($merchant, $capturedPreference->getMerchant());
+        self::assertSame($capturedCustomer, $capturedPreference->getCustomer());
     }
 
     public function testCustomerQrAuthReturnsAuthorizationPayloadWithMerchantRef(): void
@@ -215,9 +225,10 @@ final class AuthControllerTest extends TestCase
         EntityRepository $userRepository,
         EntityRepository $customerRepository,
         EntityRepository $merchantRepository,
+        ?EntityRepository $notificationPreferenceRepository = null,
     ): AuthController {
         return $this->createControllerWithEntityManager(
-            $this->createEntityManager($userRepository, $customerRepository, $merchantRepository),
+            $this->createEntityManager($userRepository, $customerRepository, $merchantRepository, $notificationPreferenceRepository),
         );
     }
 
@@ -260,14 +271,18 @@ final class AuthControllerTest extends TestCase
         EntityRepository $userRepository,
         EntityRepository $customerRepository,
         EntityRepository $merchantRepository,
+        ?EntityRepository $notificationPreferenceRepository = null,
         ?callable $onPersist = null,
     ): EntityManagerInterface {
+        $notificationPreferenceRepository ??= $this->createNotificationPreferenceRepository();
+
         $entityManager = $this->createMock(EntityManagerInterface::class);
         $entityManager->method('getRepository')->willReturnCallback(
             static fn (string $className): EntityRepository => match ($className) {
                 User::class => $userRepository,
                 Customer::class => $customerRepository,
                 Merchant::class => $merchantRepository,
+                CustomerMerchantNotificationPreference::class => $notificationPreferenceRepository,
                 default => throw new \RuntimeException('Unexpected repository: ' . $className),
             }
         );
@@ -307,6 +322,16 @@ final class AuthControllerTest extends TestCase
         $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
         $repository->method('find')->willReturnCallback(
             static fn (mixed $id) => $resolver ? $resolver($id) : null
+        );
+
+        return $repository;
+    }
+
+    private function createNotificationPreferenceRepository(?callable $resolver = null): EntityRepository&MockObject
+    {
+        $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
+        $repository->method('findOneBy')->willReturnCallback(
+            static fn (array $criteria) => $resolver ? $resolver($criteria) : null
         );
 
         return $repository;

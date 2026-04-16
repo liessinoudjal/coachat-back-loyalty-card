@@ -3,7 +3,9 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
+use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
+use App\Entity\Merchant;
 use App\Entity\Reward;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -47,8 +49,10 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Customer not found for user'], 404);
         }
 
+        $merchantList = $this->getCustomerMerchants($customer);
+        $preferenceMap = $this->getNotificationPreferenceMap($customer, $merchantList);
         $merchants = [];
-        foreach ($customer->getMerchants() as $merchant) {
+        foreach ($merchantList as $merchant) {
             $merchantId = $merchant->getId();
             if ($merchantId === null) {
                 continue;
@@ -59,20 +63,11 @@ class CustomerController extends AbstractController
                 'company_name' => $merchant->getCompanyName(),
                 'logo_url' => $merchant->getLogoUrl(),
                 'subscription_status' => $merchant->getSubscriptionStatus(),
+                'notifications' => $this->formatNotificationPreference(
+                    $merchant,
+                    $preferenceMap[$merchantId->toRfc4122()] ?? null,
+                ),
             ];
-        }
-
-        $directMerchant = $customer->getMerchant();
-        if ($directMerchant && $directMerchant->getId()) {
-            $directId = $directMerchant->getId()->toRfc4122();
-            if (!array_key_exists($directId, $merchants)) {
-                $merchants[$directId] = [
-                    'id' => $directId,
-                    'company_name' => $directMerchant->getCompanyName(),
-                    'logo_url' => $directMerchant->getLogoUrl(),
-                    'subscription_status' => $directMerchant->getSubscriptionStatus(),
-                ];
-            }
         }
 
         return new JsonResponse([
@@ -89,6 +84,92 @@ class CustomerController extends AbstractController
                 'phone' => $customer->getPhone(),
             ],
             'merchants' => array_values($merchants),
+        ]);
+    }
+
+    #[Route('/api/customers/me/notification-preferences', name: 'get_customer_notification_preferences', methods: ['GET'])]
+    public function meNotificationPreferences(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $merchants = $this->getCustomerMerchants($customer);
+        $preferenceMap = $this->getNotificationPreferenceMap($customer, $merchants);
+
+        $payload = array_map(function (Merchant $merchant) use ($preferenceMap): array {
+            $merchantId = $merchant->getId()?->toRfc4122();
+
+            return [
+                'merchant' => [
+                    'id' => $merchantId,
+                    'company_name' => $merchant->getCompanyName(),
+                    'logo_url' => $merchant->getLogoUrl(),
+                    'subscription_status' => $merchant->getSubscriptionStatus(),
+                ],
+                'notifications' => $this->formatNotificationPreference(
+                    $merchant,
+                    $merchantId !== null ? ($preferenceMap[$merchantId] ?? null) : null,
+                ),
+            ];
+        }, $merchants);
+
+        return new JsonResponse(array_values($payload));
+    }
+
+    #[Route('/api/customers/me/notification-preferences/{merchantId}', name: 'update_customer_notification_preference', methods: ['PATCH'])]
+    public function updateNotificationPreference(string $merchantId, Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantId);
+        if (!$merchant instanceof Merchant || !$this->customerHasMerchant($customer, $merchant)) {
+            return new JsonResponse(['error' => 'Merchant not found for customer'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data) || !array_key_exists('enabled', $data) || !is_bool($data['enabled'])) {
+            return new JsonResponse(['error' => 'enabled must be a boolean'], 400);
+        }
+
+        $preferenceRepository = $this->entityManager->getRepository(CustomerMerchantNotificationPreference::class);
+        $preference = $preferenceRepository->findOneBy([
+            'customer' => $customer,
+            'merchant' => $merchant,
+        ]);
+
+        if (!$preference instanceof CustomerMerchantNotificationPreference) {
+            $preference = new CustomerMerchantNotificationPreference();
+            $preference->setCustomer($customer);
+            $preference->setMerchant($merchant);
+            $this->entityManager->persist($preference);
+        }
+
+        $preference->setEnabled($data['enabled']);
+        $this->entityManager->flush();
+
+        return new JsonResponse([
+            'merchant' => [
+                'id' => $merchant->getId()?->toRfc4122(),
+                'company_name' => $merchant->getCompanyName(),
+                'logo_url' => $merchant->getLogoUrl(),
+                'subscription_status' => $merchant->getSubscriptionStatus(),
+            ],
+            'notifications' => $this->formatNotificationPreference($merchant, $preference),
         ]);
     }
 
@@ -315,5 +396,79 @@ class CustomerController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse(['success' => true]);
+    }
+
+    /**
+     * @return Merchant[]
+     */
+    private function getCustomerMerchants(Customer $customer): array
+    {
+        $merchants = [];
+
+        foreach ($customer->getMerchants() as $merchant) {
+            $merchantId = $merchant->getId()?->toRfc4122();
+            if ($merchantId === null) {
+                continue;
+            }
+
+            $merchants[$merchantId] = $merchant;
+        }
+
+        $directMerchant = $customer->getMerchant();
+        if ($directMerchant instanceof Merchant && $directMerchant->getId() !== null) {
+            $merchants[$directMerchant->getId()->toRfc4122()] = $directMerchant;
+        }
+
+        return array_values($merchants);
+    }
+
+    /**
+     * @param Merchant[] $merchants
+     *
+     * @return array<string, CustomerMerchantNotificationPreference>
+     */
+    private function getNotificationPreferenceMap(Customer $customer, array $merchants): array
+    {
+        if ($merchants === []) {
+            return [];
+        }
+
+        $preferences = $this->entityManager
+            ->getRepository(CustomerMerchantNotificationPreference::class)
+            ->findByCustomerAndMerchants($customer, $merchants);
+
+        $map = [];
+        foreach ($preferences as $preference) {
+            $merchantId = $preference->getMerchant()?->getId()?->toRfc4122();
+            if ($merchantId !== null) {
+                $map[$merchantId] = $preference;
+            }
+        }
+
+        return $map;
+    }
+
+    private function formatNotificationPreference(Merchant $merchant, ?CustomerMerchantNotificationPreference $preference): array
+    {
+        $pushAvailable = $merchant->getPlan()?->isHasPushNotifications() ?? false;
+
+        return [
+            'enabled' => $preference?->isEnabled() ?? true,
+            'available_channels' => [
+                'email' => true,
+                'push' => $pushAvailable,
+            ],
+            'updated_at' => $preference?->getUpdatedAt()->format(DATE_ATOM),
+        ];
+    }
+
+    private function customerHasMerchant(Customer $customer, Merchant $merchant): bool
+    {
+        $directMerchant = $customer->getMerchant();
+        if ($directMerchant instanceof Merchant && $directMerchant === $merchant) {
+            return true;
+        }
+
+        return $customer->getMerchants()->contains($merchant);
     }
 }
