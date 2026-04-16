@@ -127,6 +127,22 @@ class LoyaltyCardController extends AbstractController
         return new JsonResponse($this->formatCard($card), 201);
     }
 
+    #[Route('/api/loyalty_cards/{id}', name: 'get_loyalty_card', methods: ['GET'])]
+    public function getOne(int $id): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
+        if (!$card || $card->getMerchant()?->getUser() !== $user) {
+            return new JsonResponse(['error' => 'Card not found'], 404);
+        }
+
+        return new JsonResponse($this->formatCard($card));
+    }
+
     #[Route('/api/loyalty_cards/{id}', name: 'update_loyalty_card', methods: ['PATCH'])]
     public function update(int $id, Request $request): JsonResponse
     {

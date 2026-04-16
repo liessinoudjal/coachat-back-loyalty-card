@@ -145,6 +145,35 @@ final class CustomerRewardsControllerTest extends WebTestCase
         self::assertSame(1, $rewardRepo->count(['loyaltyCard' => $card]));
     }
 
+    public function testMerchantCanFetchSingleLoyaltyCard(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-card-item', ['ROLE_USER', 'ROLE_MERCHANT']);
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Item');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Item');
+
+        $customerUser = $this->createUser('customer-card-item', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Item', 'customer-item@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+
+        $card = $this->createLoyaltyCard($merchant, $program, $customer, 12, 20, false);
+
+        $token = $this->createJwtFor($merchantUser);
+        $client->request('GET', '/api/loyalty_cards/' . $card->getId(), server: [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame($card->getId(), $payload['id']);
+        self::assertSame(12, $payload['current_value']);
+        self::assertSame(20, $payload['target_value']);
+        self::assertSame('Customer Item', $payload['customer']['name']);
+        self::assertSame('Program Item', $payload['loyalty_program']['name']);
+    }
+
     public function testTransactionCompletionFlowStillCreatesReward(): void
     {
         if (!$this->hasTransactionAmountAddedColumn()) {
