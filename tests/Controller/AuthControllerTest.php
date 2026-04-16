@@ -1,0 +1,350 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Controller;
+
+use App\Controller\AuthController;
+use App\Entity\Customer;
+use App\Entity\Merchant;
+use App\Entity\RefreshToken;
+use App\Entity\User;
+use App\Service\RefreshTokenService;
+use Doctrine\ORM\EntityRepository;
+use Doctrine\ORM\EntityManagerInterface;
+use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
+use KnpU\OAuth2ClientBundle\Client\OAuth2Client;
+use League\OAuth2\Client\Provider\AbstractProvider;
+use League\OAuth2\Client\Provider\GoogleUser;
+use League\OAuth2\Client\Token\AccessToken;
+use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
+use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
+use Symfony\Component\HttpFoundation\Request;
+
+final class AuthControllerTest extends TestCase
+{
+    public function testMerchantLoginWithExistingMerchantReturnsTokens(): void
+    {
+        $user = $this->createUser('merchant@example.com', ['ROLE_USER'], 'google-merchant');
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Merchant Login');
+        $merchant->setUser($user);
+        $user->setMerchant($merchant);
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleMerchantLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertSame('refresh-token', $payload['refresh_token']);
+        self::assertContains('ROLE_MERCHANT', $user->getRoles());
+    }
+
+    public function testMerchantLoginWithoutMerchantReturnsForbidden(): void
+    {
+        $user = $this->createUser('no-merchant@example.com', ['ROLE_USER'], 'google-no-merchant');
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleMerchantLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('merchant_not_found_for_login', $payload['error']);
+    }
+
+    public function testMerchantRegisterWithNewAccountReturnsTokens(): void
+    {
+        $capturedUser = null;
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+            onPersist: static function (object $entity) use (&$capturedUser): void {
+                if ($entity instanceof User) {
+                    $capturedUser = $entity;
+                }
+            },
+        );
+
+        $controller = $this->createControllerWithEntityManager($entityManager);
+
+        $response = $controller->googleMerchantRegisterCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertNotNull($capturedUser);
+        self::assertContains('ROLE_MERCHANT', $capturedUser->getRoles());
+    }
+
+    public function testMerchantRegisterWithExistingMerchantReturnsConflict(): void
+    {
+        $user = $this->createUser('merchant-existing@example.com', ['ROLE_USER', 'ROLE_MERCHANT'], 'google-existing-merchant');
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Existing Merchant');
+        $merchant->setUser($user);
+        $user->setMerchant($merchant);
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleMerchantRegisterCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('account_already_merchant', $payload['error']);
+    }
+
+    public function testCustomerLoginDirectWithExistingCustomerReturnsTokens(): void
+    {
+        $user = $this->createUser('customer-login@example.com', ['ROLE_USER', 'ROLE_CUSTOMER'], 'google-customer-login');
+        $customer = new Customer();
+        $customer->setName('Customer Login');
+        $customer->setEmail('customer-login@example.com');
+        $customer->setUser($user);
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleCustomerLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertSame('Customer Login', $payload['customer']['name']);
+    }
+
+    public function testCustomerLoginDirectWithoutCustomerReturnsForbidden(): void
+    {
+        $user = $this->createUser('no-customer@example.com', ['ROLE_USER'], 'google-no-customer');
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(fn () => null),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleCustomerLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('customer_not_found', $payload['error']);
+    }
+
+    public function testCustomerQrSignupStillLinksCustomerToMerchant(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('QR Merchant');
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $capturedCustomer = null;
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(fn () => null),
+            merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            onPersist: static function (object $entity) use (&$capturedCustomer): void {
+                if ($entity instanceof Customer) {
+                    $capturedCustomer = $entity;
+                }
+            },
+        );
+
+        $controller = $this->createControllerWithEntityManager($entityManager);
+
+        $response = $controller->googleCustomerCallback($this->createCallbackRequest(['merchant_ref' => $merchantRef]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame($merchantRef, $payload['customer']['merchant_ref']);
+        self::assertNotNull($capturedCustomer);
+        self::assertSame($merchant, $capturedCustomer->getMerchant());
+        self::assertTrue($capturedCustomer->getMerchants()->contains($merchant));
+    }
+
+    public function testCustomerQrAuthReturnsAuthorizationPayloadWithMerchantRef(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('QR Merchant');
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+        );
+
+        $response = $controller->googleCustomerAuth(Request::create(
+            '/api/auth/customer/google',
+            'GET',
+            [
+                'merchant_ref' => $merchantRef,
+                'redirect_uri' => 'https://front.example.com/auth/customer/callback',
+            ],
+        ));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame($merchantRef, $payload['merchant_ref']);
+        self::assertSame('https://accounts.google.com/o/oauth2/auth', $payload['redirectUrl']);
+        self::assertArrayHasKey('state', $payload);
+        self::assertNotSame('', $payload['state']);
+    }
+
+    private function createController(
+        EntityRepository $userRepository,
+        EntityRepository $customerRepository,
+        EntityRepository $merchantRepository,
+    ): AuthController {
+        return $this->createControllerWithEntityManager(
+            $this->createEntityManager($userRepository, $customerRepository, $merchantRepository),
+        );
+    }
+
+    private function createControllerWithEntityManager(EntityManagerInterface $entityManager): AuthController
+    {
+        $provider = $this->createMock(AbstractProvider::class);
+        $provider->method('getAccessToken')->willReturn(new AccessToken(['access_token' => 'google-access-token']));
+        $provider->method('getAuthorizationUrl')->willReturn('https://accounts.google.com/o/oauth2/auth');
+
+        $googleUser = $this->createMock(GoogleUser::class);
+        $googleUser->method('getId')->willReturn('google-id');
+        $googleUser->method('getEmail')->willReturn('user@example.com');
+        $googleUser->method('getName')->willReturn('Google User');
+
+        $oauthClient = $this->createMock(OAuth2Client::class);
+        $oauthClient->method('getOAuth2Provider')->willReturn($provider);
+        $oauthClient->method('fetchUserFromToken')->willReturn($googleUser);
+
+        $clientRegistry = $this->createMock(ClientRegistry::class);
+        $clientRegistry->method('getClient')->with('google')->willReturn($oauthClient);
+
+        $jwtManager = $this->createMock(JWTTokenManagerInterface::class);
+        $jwtManager->method('create')->willReturn('jwt-token');
+
+        $refreshToken = new RefreshToken();
+        $refreshToken->setToken('refresh-token');
+        $refreshTokenService = $this->createMock(RefreshTokenService::class);
+        $refreshTokenService->method('createRefreshToken')->willReturn($refreshToken);
+
+        return new AuthController(
+            $entityManager,
+            $jwtManager,
+            $clientRegistry,
+            $refreshTokenService,
+            new NullLogger(),
+        );
+    }
+
+    private function createEntityManager(
+        EntityRepository $userRepository,
+        EntityRepository $customerRepository,
+        EntityRepository $merchantRepository,
+        ?callable $onPersist = null,
+    ): EntityManagerInterface {
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+        $entityManager->method('getRepository')->willReturnCallback(
+            static fn (string $className): EntityRepository => match ($className) {
+                User::class => $userRepository,
+                Customer::class => $customerRepository,
+                Merchant::class => $merchantRepository,
+                default => throw new \RuntimeException('Unexpected repository: ' . $className),
+            }
+        );
+        $entityManager->method('persist')->willReturnCallback(static function (object $entity) use ($onPersist): void {
+            if ($onPersist !== null) {
+                $onPersist($entity);
+            }
+        });
+        $entityManager->method('flush')->willReturnCallback(static function (): void {
+        });
+
+        return $entityManager;
+    }
+
+    private function createUserRepository(?callable $resolver = null): EntityRepository&MockObject
+    {
+        $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
+        $repository->method('findOneBy')->willReturnCallback(
+            static fn (array $criteria) => $resolver ? $resolver($criteria) : null
+        );
+
+        return $repository;
+    }
+
+    private function createCustomerRepository(?callable $resolver = null): EntityRepository&MockObject
+    {
+        $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
+        $repository->method('findOneBy')->willReturnCallback(
+            static fn (array $criteria) => $resolver ? $resolver($criteria) : null
+        );
+
+        return $repository;
+    }
+
+    private function createMerchantRepository(?callable $resolver = null): EntityRepository&MockObject
+    {
+        $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
+        $repository->method('find')->willReturnCallback(
+            static fn (mixed $id) => $resolver ? $resolver($id) : null
+        );
+
+        return $repository;
+    }
+
+    private function createUser(string $email, array $roles, string $googleId): User
+    {
+        $user = new User();
+        $user->setEmail($email);
+        $user->setName('Test User');
+        $user->setRoles($roles);
+        $user->setGoogleId($googleId);
+
+        return $user;
+    }
+
+    private function createCallbackRequest(array $extraPayload = []): Request
+    {
+        return Request::create(
+            '/callback',
+            'POST',
+            [],
+            [],
+            [],
+            [],
+            json_encode(array_merge([
+                'code' => 'auth-code',
+                'redirect_uri' => 'https://front.example.com/callback',
+                'state' => 'state-token',
+            ], $extraPayload), JSON_THROW_ON_ERROR),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeResponse(\Symfony\Component\HttpFoundation\JsonResponse $response): array
+    {
+        return json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+    }
+}

@@ -11,6 +11,7 @@ use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
 use KnpU\OAuth2ClientBundle\Client\OAuth2Client;
 use League\OAuth2\Client\Provider\GoogleUser;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,45 +24,44 @@ class AuthController extends AbstractController
     private $jwtManager;
     private $clientRegistry;
     private $refreshTokenService;
+    private $logger;
 
     public function __construct(
         EntityManagerInterface $entityManager,
         JWTTokenManagerInterface $jwtManager,
         ClientRegistry $clientRegistry,
-        RefreshTokenService $refreshTokenService
+        RefreshTokenService $refreshTokenService,
+        LoggerInterface $logger
     ) {
         $this->entityManager = $entityManager;
         $this->jwtManager = $jwtManager;
         $this->clientRegistry = $clientRegistry;
         $this->refreshTokenService = $refreshTokenService;
+        $this->logger = $logger;
     }
 
     #[Route('/api/auth/google', name: 'auth_google', methods: ['GET'])]
     public function googleAuth(Request $request): JsonResponse
     {
+        $this->logger->warning('Deprecated merchant Google auth endpoint used.', [
+            'route' => 'auth_google',
+        ]);
+
         $redirectUri = $request->query->get('redirect_uri');
         if (!$redirectUri) {
             return new JsonResponse(['error' => 'redirect_uri required'], 400);
         }
 
-        /** @var OAuth2Client $client */
-        $client = $this->clientRegistry->getClient('google');
-        $state = bin2hex(random_bytes(16)); // Generate state for OAuth2 specification compliance
-        $authUrl = $client->getOAuth2Provider()->getAuthorizationUrl([
-            'redirect_uri' => $redirectUri,
-            'scope' => ['openid', 'email', 'profile'],
-            'state' => $state
-        ]);
-
-        return new JsonResponse([
-            'redirectUrl' => $authUrl,
-            'state' => $state
-        ]);
+        return $this->buildGoogleAuthorizationResponse($redirectUri);
     }
 
     #[Route('/api/auth/google/callback', name: 'auth_google_callback', methods: ['POST', 'OPTIONS'])]
     public function googleCallback(Request $request): JsonResponse
     {
+        $this->logger->warning('Deprecated merchant Google callback endpoint used.', [
+            'route' => 'auth_google_callback',
+        ]);
+
         if ($request->getMethod() === 'OPTIONS') {
             return new JsonResponse(null, 200);
         }
@@ -110,6 +110,114 @@ class AuthController extends AbstractController
         }
     }
 
+    #[Route('/api/auth/merchant/google/login', name: 'auth_merchant_google_login', methods: ['GET'])]
+    public function googleMerchantLoginAuth(Request $request): JsonResponse
+    {
+        $redirectUri = $request->query->get('redirect_uri');
+        if (!$redirectUri) {
+            return new JsonResponse(['error' => 'redirect_uri required'], 400);
+        }
+
+        return $this->buildGoogleAuthorizationResponse($redirectUri);
+    }
+
+    #[Route('/api/auth/merchant/google/register', name: 'auth_merchant_google_register', methods: ['GET'])]
+    public function googleMerchantRegisterAuth(Request $request): JsonResponse
+    {
+        $redirectUri = $request->query->get('redirect_uri');
+        if (!$redirectUri) {
+            return new JsonResponse(['error' => 'redirect_uri required'], 400);
+        }
+
+        return $this->buildGoogleAuthorizationResponse($redirectUri);
+    }
+
+    #[Route('/api/auth/merchant/google/login/callback', name: 'auth_merchant_google_login_callback', methods: ['POST', 'OPTIONS'])]
+    public function googleMerchantLoginCallback(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $code = $data['code'] ?? null;
+        $redirectUri = $data['redirect_uri'] ?? null;
+
+        if (!$code || !$redirectUri) {
+            return new JsonResponse(['error' => 'code and redirect_uri required'], 400);
+        }
+
+        try {
+            $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
+            $user = $this->upsertGoogleUser($googleUser);
+
+            if ($this->isCustomerOnlyUser($user)) {
+                return new JsonResponse([
+                    'error' => 'account_already_customer',
+                    'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
+                ], 409);
+            }
+
+            if ($user->getMerchant() === null) {
+                return new JsonResponse([
+                    'error' => 'merchant_not_found_for_login',
+                    'message' => 'No merchant account is linked to this Google account. Please register first.',
+                ], 403);
+            }
+
+            $this->ensureUserRole($user, 'ROLE_MERCHANT');
+            $this->entityManager->persist($user);
+            $this->entityManager->flush();
+
+            return $this->buildAuthSuccessResponse($user);
+        } catch (\Exception $e) {
+            return new JsonResponse(['error' => 'Authentication failed: ' . $e->getMessage()], 400);
+        }
+    }
+
+    #[Route('/api/auth/merchant/google/register/callback', name: 'auth_merchant_google_register_callback', methods: ['POST', 'OPTIONS'])]
+    public function googleMerchantRegisterCallback(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $code = $data['code'] ?? null;
+        $redirectUri = $data['redirect_uri'] ?? null;
+
+        if (!$code || !$redirectUri) {
+            return new JsonResponse(['error' => 'code and redirect_uri required'], 400);
+        }
+
+        try {
+            $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
+            $user = $this->upsertGoogleUser($googleUser);
+
+            if ($this->isCustomerOnlyUser($user)) {
+                return new JsonResponse([
+                    'error' => 'account_already_customer',
+                    'message' => 'This Google account is already linked to a customer profile. Use customer signup or login flow.',
+                ], 409);
+            }
+
+            if ($user->getMerchant() !== null) {
+                return new JsonResponse([
+                    'error' => 'account_already_merchant',
+                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
+                ], 409);
+            }
+
+            $this->ensureUserRole($user, 'ROLE_MERCHANT');
+            $this->entityManager->persist($user);
+            $this->entityManager->flush();
+
+            return $this->buildAuthSuccessResponse($user);
+        } catch (\Exception $e) {
+            return new JsonResponse(['error' => 'Authentication failed: ' . $e->getMessage()], 400);
+        }
+    }
+
     #[Route('/api/auth/customer/google', name: 'auth_customer_google', methods: ['GET'])]
     public function googleCustomerAuth(Request $request): JsonResponse
     {
@@ -131,20 +239,24 @@ class AuthController extends AbstractController
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
-        /** @var OAuth2Client $client */
-        $client = $this->clientRegistry->getClient('google');
-        $state = bin2hex(random_bytes(16));
-        $authUrl = $client->getOAuth2Provider()->getAuthorizationUrl([
-            'redirect_uri' => $redirectUri,
-            'scope' => ['openid', 'email', 'profile'],
-            'state' => $state,
-        ]);
+        $response = $this->buildGoogleAuthorizationPayload($redirectUri);
 
         return new JsonResponse([
-            'redirectUrl' => $authUrl,
-            'state' => $state,
+            'redirectUrl' => $response['redirectUrl'],
+            'state' => $response['state'],
             'merchant_ref' => trim($merchantRef),
         ]);
+    }
+
+    #[Route('/api/auth/customer/google/login', name: 'auth_customer_google_login', methods: ['GET'])]
+    public function googleCustomerLoginAuth(Request $request): JsonResponse
+    {
+        $redirectUri = $request->query->get('redirect_uri');
+        if (!$redirectUri) {
+            return new JsonResponse(['error' => 'redirect_uri required'], 400);
+        }
+
+        return $this->buildGoogleAuthorizationResponse($redirectUri);
     }
 
     #[Route('/api/auth/customer/google/callback', name: 'auth_customer_google_callback', methods: ['POST', 'OPTIONS'])]
@@ -175,15 +287,7 @@ class AuthController extends AbstractController
         }
 
         try {
-            /** @var OAuth2Client $client */
-            $client = $this->clientRegistry->getClient('google');
-            $accessToken = $client->getOAuth2Provider()->getAccessToken('authorization_code', [
-                'code' => $code,
-                'redirect_uri' => $redirectUri,
-            ]);
-
-            /** @var GoogleUser $googleUser */
-            $googleUser = $client->fetchUserFromToken($accessToken);
+            $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
 
             $user = $this->upsertGoogleUser($googleUser);
 
@@ -206,9 +310,10 @@ class AuthController extends AbstractController
 
             if ($customer === null) {
                 $customer = $customerRepository->findOneBy(['email' => $googleUser->getEmail()]);
-                if ($customer instanceof Customer && $customer->getUser() === null) {
-                    $customer->setUser($user);
-                }
+            }
+
+            if ($customer instanceof Customer && $this->canBindCustomerToUser($customer, $user)) {
+                $customer->setUser($user);
             }
 
             if ($customer === null) {
@@ -240,6 +345,57 @@ class AuthController extends AbstractController
                     'email' => $customer->getEmail(),
                     'name' => $customer->getName(),
                     'merchant_ref' => $merchant->getId()?->toRfc4122(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return new JsonResponse(['error' => 'Authentication failed: ' . $e->getMessage()], 400);
+        }
+    }
+
+    #[Route('/api/auth/customer/google/login/callback', name: 'auth_customer_google_login_callback', methods: ['POST', 'OPTIONS'])]
+    public function googleCustomerLoginCallback(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $code = $data['code'] ?? null;
+        $redirectUri = $data['redirect_uri'] ?? null;
+
+        if (!$code || !$redirectUri) {
+            return new JsonResponse(['error' => 'code and redirect_uri required'], 400);
+        }
+
+        try {
+            $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
+            $user = $this->upsertGoogleUser($googleUser);
+
+            $customer = $this->resolveCustomerForUser($user, $googleUser);
+            if (!$this->hasCustomerAccess($user, $customer)) {
+                return new JsonResponse([
+                    'error' => 'customer_not_found',
+                    'message' => 'No customer account is linked to this Google account yet. Please sign up first via the merchant QR code.',
+                ], 403);
+            }
+
+            $this->ensureUserRole($user, 'ROLE_CUSTOMER');
+
+            $this->entityManager->persist($user);
+            $this->entityManager->flush();
+
+            return new JsonResponse([
+                'token' => $this->jwtManager->create($user),
+                'refresh_token' => $this->refreshTokenService->createRefreshToken($user)->getToken(),
+                'user' => [
+                    'id' => $user->getId(),
+                    'email' => $user->getEmail(),
+                    'name' => $user->getName(),
+                ],
+                'customer' => [
+                    'id' => $customer->getId(),
+                    'email' => $customer->getEmail(),
+                    'name' => $customer->getName(),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -310,6 +466,102 @@ class AuthController extends AbstractController
                 'name' => $user->getName(),
             ],
         ]);
+    }
+
+    private function buildGoogleAuthorizationResponse(string $redirectUri): JsonResponse
+    {
+        return new JsonResponse($this->buildGoogleAuthorizationPayload($redirectUri));
+    }
+
+    /**
+     * @return array{redirectUrl: string, state: string}
+     */
+    private function buildGoogleAuthorizationPayload(string $redirectUri): array
+    {
+        /** @var OAuth2Client $client */
+        $client = $this->clientRegistry->getClient('google');
+        $state = bin2hex(random_bytes(16));
+        $authUrl = $client->getOAuth2Provider()->getAuthorizationUrl([
+            'redirect_uri' => $redirectUri,
+            'scope' => ['openid', 'email', 'profile'],
+            'state' => $state,
+        ]);
+
+        return [
+            'redirectUrl' => $authUrl,
+            'state' => $state,
+        ];
+    }
+
+    private function fetchGoogleUserFromCode(string $code, string $redirectUri): GoogleUser
+    {
+        /** @var OAuth2Client $client */
+        $client = $this->clientRegistry->getClient('google');
+        $accessToken = $client->getOAuth2Provider()->getAccessToken('authorization_code', [
+            'code' => $code,
+            'redirect_uri' => $redirectUri,
+        ]);
+
+        /** @var GoogleUser $googleUser */
+        $googleUser = $client->fetchUserFromToken($accessToken);
+
+        return $googleUser;
+    }
+
+    private function resolveCustomerForUser(User $user, GoogleUser $googleUser): ?Customer
+    {
+        $customerRepository = $this->entityManager->getRepository(Customer::class);
+        $customer = $user->getCustomer();
+
+        if ($customer === null && $user->getId() !== null) {
+            $customer = $customerRepository->findOneBy(['user' => $user]);
+        }
+
+        if ($customer === null) {
+            $customer = $customerRepository->findOneBy(['email' => $googleUser->getEmail()]);
+        }
+
+        if ($customer instanceof Customer && $this->canBindCustomerToUser($customer, $user)) {
+            $customer->setUser($user);
+        }
+
+        return $customer;
+    }
+
+    private function hasCustomerAccess(User $user, ?Customer $customer): bool
+    {
+        if ($customer === null || !in_array('ROLE_CUSTOMER', $user->getRoles(), true)) {
+            return false;
+        }
+
+        return $customer->getUser() === $user;
+    }
+
+    private function isCustomerOnlyUser(User $user): bool
+    {
+        return $user->getCustomer() !== null && $user->getMerchant() === null;
+    }
+
+    private function canBindCustomerToUser(Customer $customer, User $user): bool
+    {
+        $linkedUser = $customer->getUser();
+
+        if ($linkedUser === null || $linkedUser === $user) {
+            return true;
+        }
+
+        $linkedGoogleId = $linkedUser->getGoogleId();
+        $userGoogleId = $user->getGoogleId();
+        if ($linkedGoogleId !== null && $userGoogleId !== null && $linkedGoogleId === $userGoogleId) {
+            return true;
+        }
+
+        $linkedEmail = $linkedUser->getEmail();
+        $userEmail = $user->getEmail();
+
+        return $linkedEmail !== null
+            && $userEmail !== null
+            && strcasecmp($linkedEmail, $userEmail) === 0;
     }
 
     private function resolveMerchantByRef(string $merchantRef): ?Merchant
