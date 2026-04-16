@@ -173,6 +173,135 @@ class CustomerController extends AbstractController
         ]);
     }
 
+    #[Route('/api/customers/me/available-programs', name: 'get_customer_available_programs', methods: ['GET'])]
+    public function meAvailablePrograms(): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $merchants = $this->getCustomerMerchants($customer);
+        $merchantMap = [];
+        foreach ($merchants as $merchant) {
+            $merchantId = $merchant->getId()?->toRfc4122();
+            if ($merchantId === null) {
+                continue;
+            }
+
+            $merchantMap[$merchantId] = [
+                'merchant' => [
+                    'id' => $merchantId,
+                    'company_name' => $merchant->getCompanyName(),
+                    'logo_url' => $merchant->getLogoUrl(),
+                ],
+                'programs' => [],
+            ];
+        }
+
+        if ($merchantMap === []) {
+            return new JsonResponse([]);
+        }
+
+        $activeCards = $this->entityManager->getRepository(LoyaltyCard::class)
+            ->createQueryBuilder('card')
+            ->addSelect('program')
+            ->leftJoin('card.loyaltyProgram', 'program')
+            ->andWhere('card.customer = :customer')
+            ->andWhere('card.isCompleted = :isCompleted')
+            ->setParameter('customer', $customer)
+            ->setParameter('isCompleted', false)
+            ->getQuery()
+            ->getResult();
+
+        $activeProgramIds = [];
+        foreach ($activeCards as $activeCard) {
+            $programId = $activeCard->getLoyaltyProgram()?->getId();
+            if ($programId !== null) {
+                $activeProgramIds[$programId] = true;
+            }
+        }
+
+        foreach ($merchants as $merchant) {
+            $merchantId = $merchant->getId()?->toRfc4122();
+            if ($merchantId === null || !isset($merchantMap[$merchantId])) {
+                continue;
+            }
+
+            $activePrograms = $merchant->getLoyaltyPrograms()
+                ->filter(static fn ($program) => $program->isActive())
+                ->toArray();
+
+            usort($activePrograms, static fn ($leftProgram, $rightProgram) => strcmp((string) $leftProgram->getName(), (string) $rightProgram->getName()));
+
+            foreach ($activePrograms as $program) {
+                $merchantMap[$merchantId]['programs'][] = $this->formatAvailableProgram(
+                    $program,
+                    isset($activeProgramIds[$program->getId() ?? 0]),
+                );
+            }
+        }
+
+        return new JsonResponse(array_values($merchantMap));
+    }
+
+    #[Route('/api/customers/me/cards', name: 'create_customer_card_self_enrollment', methods: ['POST'])]
+    public function createOwnCard(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data) || !array_key_exists('loyalty_program_id', $data) || $data['loyalty_program_id'] === null || $data['loyalty_program_id'] === '') {
+            return new JsonResponse(['error' => 'loyalty_program_id_required'], 400);
+        }
+
+        $program = $this->entityManager->getRepository(\App\Entity\LoyaltyProgram::class)->find($data['loyalty_program_id']);
+        if (!$program instanceof \App\Entity\LoyaltyProgram || !$program->isActive()) {
+            return new JsonResponse(['error' => 'program_not_found'], 404);
+        }
+
+        $merchant = $program->getMerchant();
+        if (!$merchant instanceof Merchant || !$this->customerHasMerchant($customer, $merchant)) {
+            return new JsonResponse(['error' => 'not_customer_of_merchant'], 403);
+        }
+
+        $existingActiveCard = $this->entityManager->getRepository(LoyaltyCard::class)->findOneBy([
+            'customer' => $customer,
+            'loyaltyProgram' => $program,
+            'isCompleted' => false,
+        ]);
+
+        if ($existingActiveCard instanceof LoyaltyCard) {
+            return new JsonResponse(['error' => 'active_card_already_exists'], 409);
+        }
+
+        $card = new LoyaltyCard();
+        $card->setCustomer($customer);
+        $card->setMerchant($merchant);
+        $card->setLoyaltyProgram($program);
+        $card->setCurrentValue(0);
+        $card->setTargetValue($program->getType()->value === 'POINTS' ? $program->getPointsTarget() : $program->getStampTarget());
+        $card->setIsCompleted(false);
+
+        $this->entityManager->persist($card);
+        $this->entityManager->flush();
+
+        return new JsonResponse($this->formatCustomerCard($card), 201);
+    }
+
     #[Route('/api/customers/me/cards', name: 'get_customer_cards', methods: ['GET'])]
     public function meCards(): JsonResponse
     {
@@ -192,29 +321,7 @@ class CustomerController extends AbstractController
                 continue;
             }
 
-            $merchant = $card->getMerchant();
-            $merchantId = $merchant?->getId()?->toRfc4122();
-            $walletToken = $card->getWalletToken();
-
-            $cards[] = [
-                'id' => $card->getId(),
-                'wallet_token' => $walletToken,
-                'current_value' => $card->getCurrentValue(),
-                'target_value' => $card->getTargetValue(),
-                'is_completed' => $card->isCompleted(),
-                'wallet_apple_url' => $walletToken ? ('/public/wallet/apple/' . $walletToken) : null,
-                'wallet_google_url' => $walletToken ? ('/public/wallet/google/' . $walletToken) : null,
-                'merchant' => $merchant ? [
-                    'id' => $merchantId,
-                    'company_name' => $merchant->getCompanyName(),
-                    'logo_url' => $merchant->getLogoUrl(),
-                ] : null,
-                'loyalty_program' => $card->getLoyaltyProgram() ? [
-                    'id' => $card->getLoyaltyProgram()->getId(),
-                    'name' => $card->getLoyaltyProgram()->getName(),
-                    'type' => $card->getLoyaltyProgram()->getType()->value,
-                ] : null,
-            ];
+            $cards[] = $this->formatCustomerCard($card);
         }
 
         return new JsonResponse($cards);
@@ -419,6 +526,16 @@ class CustomerController extends AbstractController
             $merchants[$directMerchant->getId()->toRfc4122()] = $directMerchant;
         }
 
+        foreach ($customer->getLoyaltyCards() as $card) {
+            $cardMerchant = $card->getMerchant();
+            $cardMerchantId = $cardMerchant?->getId()?->toRfc4122();
+            if ($cardMerchantId === null) {
+                continue;
+            }
+
+            $merchants[$cardMerchantId] = $cardMerchant;
+        }
+
         return array_values($merchants);
     }
 
@@ -462,11 +579,59 @@ class CustomerController extends AbstractController
         ];
     }
 
+    private function formatAvailableProgram(\App\Entity\LoyaltyProgram $program, bool $alreadyHasActiveCard): array
+    {
+        return [
+            'id' => $program->getId(),
+            'name' => $program->getName(),
+            'type' => $program->getType()->value,
+            'stamp_target' => $program->getStampTarget(),
+            'points_per_euro' => $program->getPointsPerEuro(),
+            'points_target' => $program->getPointsTarget(),
+            'reward_description' => $program->getRewardDescription(),
+            'is_active' => $program->isActive(),
+            'already_has_active_card' => $alreadyHasActiveCard,
+        ];
+    }
+
+    private function formatCustomerCard(LoyaltyCard $card): array
+    {
+        $merchant = $card->getMerchant();
+        $merchantId = $merchant?->getId()?->toRfc4122();
+        $walletToken = $card->getWalletToken();
+
+        return [
+            'id' => $card->getId(),
+            'wallet_token' => $walletToken,
+            'current_value' => $card->getCurrentValue(),
+            'target_value' => $card->getTargetValue(),
+            'is_completed' => $card->isCompleted(),
+            'wallet_apple_url' => $walletToken ? ('/public/wallet/apple/' . $walletToken) : null,
+            'wallet_google_url' => $walletToken ? ('/public/wallet/google/' . $walletToken) : null,
+            'merchant' => $merchant ? [
+                'id' => $merchantId,
+                'company_name' => $merchant->getCompanyName(),
+                'logo_url' => $merchant->getLogoUrl(),
+            ] : null,
+            'loyalty_program' => $card->getLoyaltyProgram() ? [
+                'id' => $card->getLoyaltyProgram()->getId(),
+                'name' => $card->getLoyaltyProgram()->getName(),
+                'type' => $card->getLoyaltyProgram()->getType()->value,
+            ] : null,
+        ];
+    }
+
     private function customerHasMerchant(Customer $customer, Merchant $merchant): bool
     {
         $directMerchant = $customer->getMerchant();
         if ($directMerchant instanceof Merchant && $directMerchant === $merchant) {
             return true;
+        }
+
+        foreach ($customer->getLoyaltyCards() as $card) {
+            if ($card->getMerchant() === $merchant) {
+                return true;
+            }
         }
 
         return $customer->getMerchants()->contains($merchant);

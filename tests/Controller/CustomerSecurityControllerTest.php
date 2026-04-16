@@ -16,6 +16,158 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 class CustomerSecurityControllerTest extends WebTestCase
 {
+    public function testCustomerCanListAvailableProgramsByMerchant(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-available-programs');
+        $merchant = $this->createMerchant($merchantUser, 'Coffee Shop');
+
+        $programActive = $this->createLoyaltyProgram($merchant, 'Programme tampons cafe', LoyaltyProgramType::STAMP, true);
+        $programActive->setStampTarget(10);
+        $programActive->setRewardDescription('1 cafe offert');
+
+        $programInactive = $this->createLoyaltyProgram($merchant, 'Programme inactif', LoyaltyProgramType::POINTS, false);
+
+        $em = $this->getEntityManager();
+        $em->flush();
+
+        $customerUser = $this->createUser('customer-available-programs', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Available', 'customer-available@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+        $this->createLoyaltyCard($merchant, $programActive, $customer);
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request('GET', '/api/customers/me/available-programs', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertCount(1, $payload);
+        self::assertSame('Coffee Shop', $payload[0]['merchant']['company_name']);
+        self::assertCount(1, $payload[0]['programs']);
+        self::assertSame($programActive->getId(), $payload[0]['programs'][0]['id']);
+        self::assertSame('STAMP', $payload[0]['programs'][0]['type']);
+        self::assertTrue($payload[0]['programs'][0]['already_has_active_card']);
+        self::assertSame('1 cafe offert', $payload[0]['programs'][0]['reward_description']);
+        self::assertNotSame($programInactive->getId(), $payload[0]['programs'][0]['id']);
+    }
+
+    public function testCustomerCanSelfEnrollIntoProgram(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-self-enroll');
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Self Enroll');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Self Enroll', LoyaltyProgramType::STAMP, true);
+        $program->setStampTarget(8);
+        $this->getEntityManager()->flush();
+
+        $customerUser = $this->createUser('customer-self-enroll', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Self Enroll', 'customer-self-enroll@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+        $this->getEntityManager()->flush();
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request(
+            'POST',
+            '/api/customers/me/cards',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode(['loyalty_program_id' => $program->getId()], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(201);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame($program->getId(), $payload['loyalty_program']['id']);
+        self::assertSame(0, $payload['current_value']);
+        self::assertSame(8, $payload['target_value']);
+        self::assertFalse($payload['is_completed']);
+    }
+
+    public function testCustomerCannotSelfEnrollTwiceIntoActiveProgram(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-self-enroll-conflict');
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Conflict');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Conflict');
+
+        $customerUser = $this->createUser('customer-self-enroll-conflict', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Conflict', 'customer-conflict@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+        $this->createLoyaltyCard($merchant, $program, $customer);
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request(
+            'POST',
+            '/api/customers/me/cards',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode(['loyalty_program_id' => $program->getId()], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(409);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('active_card_already_exists', $payload['error']);
+    }
+
+    public function testCustomerCannotSelfEnrollWithoutMerchantRelationship(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-self-enroll-forbidden');
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Forbidden');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Forbidden');
+
+        $customerUser = $this->createUser('customer-self-enroll-forbidden', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $this->createCustomer('Customer Forbidden', 'customer-forbidden@example.com', null, null, $customerUser);
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request(
+            'POST',
+            '/api/customers/me/cards',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode(['loyalty_program_id' => $program->getId()], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(403);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('not_customer_of_merchant', $payload['error']);
+    }
+
+    public function testCustomerSelfEnrollRequiresProgramId(): void
+    {
+        $client = static::createClient();
+
+        $customerUser = $this->createUser('customer-self-enroll-missing', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $this->createCustomer('Customer Missing Program', 'customer-missing@example.com', null, null, $customerUser);
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request(
+            'POST',
+            '/api/customers/me/cards',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(400);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('loyalty_program_id_required', $payload['error']);
+    }
+
     public function testMerchantACannotSeeMerchantBCustomers(): void
     {
         $client = static::createClient();
@@ -410,12 +562,12 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertNull($deleted);
     }
 
-    private function createUser(string $suffix): User
+    private function createUser(string $suffix, array $roles = ['ROLE_USER']): User
     {
         $user = new User();
         $user->setEmail(sprintf('customer-sec-test-%s-%s@example.com', $suffix, bin2hex(random_bytes(4))));
         $user->setName('Test User ' . $suffix);
-        $user->setRoles(['ROLE_USER']);
+        $user->setRoles($roles);
         $user->setPassword('test-password');
 
         $em = $this->getEntityManager();
@@ -441,13 +593,21 @@ class CustomerSecurityControllerTest extends WebTestCase
         return $merchant;
     }
 
-    private function createLoyaltyProgram(Merchant $merchant, string $name): LoyaltyProgram
+    private function createLoyaltyProgram(Merchant $merchant, string $name, LoyaltyProgramType $type = LoyaltyProgramType::POINTS, bool $isActive = true): LoyaltyProgram
     {
         $program = new LoyaltyProgram();
         $program->setName($name);
-        $program->setType(LoyaltyProgramType::POINTS);
-        $program->setPointsPerEuro(10);
-        $program->setPointsTarget(100);
+        $program->setType($type);
+        $program->setIsActive($isActive);
+        if ($type === LoyaltyProgramType::POINTS) {
+            $program->setPointsPerEuro(10);
+            $program->setPointsTarget(100);
+            $program->setStampTarget(null);
+        } else {
+            $program->setPointsPerEuro(null);
+            $program->setPointsTarget(null);
+            $program->setStampTarget(10);
+        }
         $program->setMerchant($merchant);
 
         $em = $this->getEntityManager();
@@ -457,7 +617,7 @@ class CustomerSecurityControllerTest extends WebTestCase
         return $program;
     }
 
-    private function createCustomer(string $name, string $email, ?string $phone = null, ?Merchant $merchant = null): Customer
+    private function createCustomer(string $name, string $email, ?string $phone = null, ?Merchant $merchant = null, ?User $user = null): Customer
     {
         $customer = new Customer();
         $customer->setName($name);
@@ -467,6 +627,9 @@ class CustomerSecurityControllerTest extends WebTestCase
         }
         if ($merchant) {
             $customer->setMerchant($merchant);
+        }
+        if ($user) {
+            $customer->setUser($user);
         }
 
         $em = $this->getEntityManager();

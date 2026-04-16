@@ -8,7 +8,7 @@ Cette API Symfony fournit un système complet de gestion de cartes de fidélité
 - Gestion des commerçants, programmes de fidélité, cartes, transactions, clients
 - Rewards (récompenses) réclamables via QR code
 - Parcours customer authentifié (Google OAuth customer + dashboard multi-marchands)
-- Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `GET /api/customers/me/rewards`
+- Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `POST /api/customers/me/cards`, `GET /api/customers/me/rewards`, `GET /api/customers/me/notification-preferences`, `GET /api/customers/me/available-programs`
 
 L'API utilise JWT pour l'authentification des marchands et API Platform pour la gestion des ressources.
 
@@ -77,17 +77,18 @@ Le JWT émis par le backend contient les claims standards suivants :
   - merchant : appeler `GET /api/merchants/me`
   - customer : appeler `GET /api/customers/me/bootstrap`
 
-#### 1. Initiate Google Login
+#### 1. Merchant Google Login
 ```
-GET /api/auth/google?redirect_uri=<frontend_callback_url>
+GET /api/auth/merchant/google/login?redirect_uri=<frontend_callback_url>
+POST /api/auth/merchant/google/login/callback
 ```
 
-Retourne l'URL d'autorisation Google à ouvrir dans le navigateur ainsi qu'un paramètre `state` pour la protection CSRF.
+Flow dédié à la connexion merchant existante.
 
-**Paramètres :**
-- `redirect_uri` (requis) : URL de callback du frontend (ex: `http://localhost:5173/auth/callback`)
+**GET login :**
+- Paramètre requis : `redirect_uri`
 
-**Réponse :**
+**Réponse GET :**
 ```json
 {
   "redirectUrl": "https://accounts.google.com/oauth/authorize?...",
@@ -95,48 +96,87 @@ Retourne l'URL d'autorisation Google à ouvrir dans le navigateur ainsi qu'un pa
 }
 ```
 
-**Important :** Le frontend doit stocker la valeur `state` retournée pour l'utiliser dans l'étape 2.
-
-#### 2. Handle Google Callback
-```
-POST /api/auth/google/callback
-```
-
-Échange le code d'autorisation contre un JWT token. Doit recevoir le code Google, l'URI de redirection et le state pour la protection CSRF.
-
-**Body :**
+**Body callback :**
 ```json
 {
   "code": "authorization_code_from_google",
   "redirect_uri": "http://localhost:5173/auth/callback",
-  "state": "state_value_from_step_1"
+  "state": "optional_state_from_step_1"
 }
 ```
 
-**Paramètres :**
-- `code` (requis) : Code d'autorisation reçu de Google dans l'URL de callback
-- `redirect_uri` (requis) : Doit correspondre exactement à l'URI envoyé à l'étape 1 et configuré dans Google Console
-- `state` (optionnel) : Valeur state retournée à l'étape 1, inclus pour conformité OAuth2
-
-**Réponse :**
+**Réponse callback :**
 ```json
 {
   "token": "jwt_token_here",
-  "refresh_token": null,
+  "refresh_token": "refresh_token_here",
   "user": {
     "id": 1,
-    "email": "user@example.com",
-    "name": "User Name"
+    "email": "merchant@example.com",
+    "name": "Merchant Name"
   }
 }
 ```
 
-**Erreurs possibles :**
-- `400` : `code` ou `redirect_uri` manquant
-- `401` : Code invalide ou expiré
-- `500` : Erreur lors de l'échange du code avec Google
+**Erreurs métier stables :**
+- `400` : `redirect_uri required`
+- `400` : `code and redirect_uri required`
+- `403` : `merchant_not_found_for_login`
+- `409` : `account_already_customer`
+- `400` : `Authentication failed: ...`
 
-#### 2.b Customer Google Login (QR / merchant_ref requis)
+#### 2. Merchant Google Register
+```
+GET /api/auth/merchant/google/register?redirect_uri=<frontend_callback_url>
+POST /api/auth/merchant/google/register/callback
+```
+
+Flow dédié à l'authentification préalable à l'onboarding merchant. Il n'instancie pas le profil merchant métier, qui reste créé ensuite via `POST /api/merchants`.
+
+**GET register :**
+- Paramètre requis : `redirect_uri`
+
+**Réponse GET :**
+```json
+{
+  "redirectUrl": "https://accounts.google.com/oauth/authorize?...",
+  "state": "random_state_string_for_csrf_protection"
+}
+```
+
+**Body callback :**
+```json
+{
+  "code": "authorization_code_from_google",
+  "redirect_uri": "http://localhost:5173/auth/callback",
+  "state": "optional_state_from_step_1"
+}
+```
+
+**Réponse callback :** même format que le login merchant.
+
+**Erreurs métier stables :**
+- `400` : `redirect_uri required`
+- `400` : `code and redirect_uri required`
+- `409` : `account_already_customer`
+- `409` : `account_already_merchant`
+- `400` : `Authentication failed: ...`
+
+#### 2.b Legacy Merchant Google Endpoints (compatibilité)
+```
+GET /api/auth/google?redirect_uri=<frontend_callback_url>
+POST /api/auth/google/callback
+```
+
+Ces endpoints merchant historiques sont encore disponibles pour compatibilité de transition.
+
+**Important :** privilégier les nouveaux endpoints :
+- `GET /api/auth/merchant/google/login`
+- `POST /api/auth/merchant/google/login/callback`
+- `GET /api/auth/merchant/google/register`
+- `POST /api/auth/merchant/google/register/callback`
+
+#### 2.c Customer Google Login (QR / merchant_ref requis)
 ```
 GET /api/auth/customer/google?redirect_uri=<frontend_callback_url>&merchant_ref=<merchant_uuid>
 POST /api/auth/customer/google/callback
@@ -210,6 +250,48 @@ Ce flow est dédié aux customers et ne fonctionne qu'avec un `merchant_ref` val
 - Attribue le rôle `ROLE_CUSTOMER`
 - Crée/relie le `Customer` au `User` sans doublon (priorité : `customer.user`, fallback `customer.email` si `user` manquant)
 - Lie le customer au merchant via relation multi-marchands
+- Crée une préférence de notification par défaut activée pour ce merchant
+
+#### 2.d Customer Google Login Direct (sans QR)
+```
+GET /api/auth/customer/google/login?redirect_uri=<frontend_callback_url>
+POST /api/auth/customer/google/login/callback
+```
+
+Ce flow est dédié à la connexion d'un customer déjà existant, sans `merchant_ref`.
+
+**Body callback :**
+```json
+{
+  "code": "authorization_code_from_google",
+  "state": "optional_state_from_step_1",
+  "redirect_uri": "http://localhost:5173/auth/customer/callback"
+}
+```
+
+**Réponse callback :**
+```json
+{
+  "token": "jwt_token_here",
+  "refresh_token": "refresh_token_here",
+  "user": {
+    "id": 10,
+    "email": "customer@example.com",
+    "name": "Customer Name"
+  },
+  "customer": {
+    "id": 42,
+    "email": "customer@example.com",
+    "name": "Customer Name"
+  }
+}
+```
+
+**Erreurs métier stables :**
+- `400` : `redirect_uri required`
+- `400` : `code and redirect_uri required`
+- `403` : `customer_not_found`
+- `400` : `Authentication failed: ...`
 
 #### 3. Get User Profile
 ```
@@ -776,6 +858,25 @@ Retourne toutes les cartes de fidélité d'un commerçant.
   }
 ]
 ```
+
+### Get One Loyalty Card
+```
+GET /api/loyalty_cards/{id}
+```
+
+Retourne une carte de fidélité unique du merchant connecté.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Paramètres :**
+- `id` : identifiant integer de la carte
+
+**Réponse :** même format qu'un item de `GET /api/loyalty_cards?merchant=...`
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Card not found`
 
 ### Create Loyalty Card
 ```
@@ -1543,7 +1644,15 @@ Retourne le profil customer + user + merchants associés pour l'onboarding/dashb
       "id": "uuid-merchant",
       "company_name": "Shop A",
       "logo_url": null,
-      "subscription_status": "active"
+      "subscription_status": "active",
+      "notifications": {
+        "enabled": true,
+        "available_channels": {
+          "email": true,
+          "push": false
+        },
+        "updated_at": "2026-04-16T10:15:00+00:00"
+      }
     }
   ]
 }
@@ -1552,6 +1661,76 @@ Retourne le profil customer + user + merchants associés pour l'onboarding/dashb
 **Erreurs :**
 - `401` : `Unauthorized`
 - `404` : `Customer not found for user`
+
+### Customer Notification Preferences
+```
+GET /api/customers/me/notification-preferences
+PATCH /api/customers/me/notification-preferences/{merchantId}
+```
+
+Permet au customer de gérer l'opt-in de notifications merchant par merchant.
+
+**Règles :**
+- préférence globale par merchant
+- par défaut `enabled = true` à l'inscription customer via QR
+- `email` est toujours disponible
+- `push` dépend du plan merchant (`plan.has_push_notifications`)
+- pas encore de granularité séparée email/push côté customer
+
+**Réponse GET :**
+```json
+[
+  {
+    "merchant": {
+      "id": "uuid-merchant",
+      "company_name": "Shop A",
+      "logo_url": null,
+      "subscription_status": "active"
+    },
+    "notifications": {
+      "enabled": true,
+      "available_channels": {
+        "email": true,
+        "push": false
+      },
+      "updated_at": "2026-04-16T10:15:00+00:00"
+    }
+  }
+]
+```
+
+**Body PATCH :**
+```json
+{
+  "enabled": false
+}
+```
+
+**Réponse PATCH :**
+```json
+{
+  "merchant": {
+    "id": "uuid-merchant",
+    "company_name": "Shop A",
+    "logo_url": null,
+    "subscription_status": "active"
+  },
+  "notifications": {
+    "enabled": false,
+    "available_channels": {
+      "email": true,
+      "push": false
+    },
+    "updated_at": "2026-04-16T10:20:00+00:00"
+  }
+}
+```
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Customer not found for user`
+- `404` : `Merchant not found for customer`
+- `400` : `enabled must be a boolean`
 
 ### Customer Cards Multi-Merchant
 ```
@@ -1591,6 +1770,77 @@ Retourne une liste **plate** des cartes du customer, chaque carte embarque son m
 **Erreurs :**
 - `401` : `Unauthorized`
 - `404` : `Customer not found for user`
+
+### Customer Available Programs
+```
+GET /api/customers/me/available-programs
+```
+
+Retourne, pour chaque merchant auquel le customer est rattaché, la liste des programmes actifs avec l'indicateur `already_has_active_card`.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis, token customer)
+
+**Règles métier :**
+- seuls les marchands rattachés au customer apparaissent
+- rattachement accepté via inscription merchant ou carte existante
+- seuls les programmes `is_active = true` apparaissent
+- un customer ne peut avoir qu'une seule carte active (`is_completed = false`) par programme
+
+**Réponse :**
+```json
+[
+  {
+    "merchant": {
+      "id": "merchant-uuid",
+      "company_name": "Coffee Shop",
+      "logo_url": "https://..."
+    },
+    "programs": [
+      {
+        "id": 12,
+        "name": "Programme tampons cafe",
+        "type": "STAMP",
+        "stamp_target": 10,
+        "points_per_euro": null,
+        "points_target": null,
+        "reward_description": "1 cafe offert",
+        "is_active": true,
+        "already_has_active_card": false
+      }
+    ]
+  }
+]
+```
+
+**Erreurs :**
+- `401` : `Unauthorized`
+- `404` : `Customer not found for user`
+
+### Customer Self-Enrollment Card Creation
+```
+POST /api/customers/me/cards
+```
+
+Crée une carte de fidélité pour le customer authentifié dans le programme demandé.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis, token customer)
+
+**Body :**
+```json
+{
+  "loyalty_program_id": 12
+}
+```
+
+**Réponse (201) :** même format qu'un item de `GET /api/customers/me/cards`
+
+**Erreurs métier stables :**
+- `400` : `loyalty_program_id_required`
+- `404` : `program_not_found`
+- `403` : `not_customer_of_merchant`
+- `409` : `active_card_already_exists`
 
 ### Customer Rewards Multi-Merchant
 ```
