@@ -314,9 +314,6 @@ class MerchantController extends AbstractController
                 return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
             }
         }
-        if (isset($data['email'])) {
-            $merchant->setEmail($data['email']);
-        }
         if (isset($data['stripe_customer_id'])) {
             $merchant->setStripeCustomerId($data['stripe_customer_id']);
         }

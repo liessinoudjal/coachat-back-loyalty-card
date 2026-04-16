@@ -492,6 +492,66 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertSame('06 11 22 33 44', $payload['phone']);
     }
 
+    public function testMerchantUpdateCustomerIgnoresDifferentEmail(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-customer-email-readonly');
+        $merchant = $this->createMerchant($merchantUser, 'Shop Customer Email');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Customer Email');
+        $customer = $this->createCustomer('Readonly Customer', 'readonly-customer@example.com', '06 00 00 00 01');
+        $this->createLoyaltyCard($merchant, $program, $customer);
+
+        $token = $this->createJwtFor($merchantUser);
+        $client->request(
+            'PUT',
+            '/api/customers/' . $customer->getId(),
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'email' => 'changed@example.com',
+                'phone' => '06 99 88 77 66',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('readonly-customer@example.com', $payload['email']);
+        self::assertSame('06 99 88 77 66', $payload['phone']);
+    }
+
+    public function testMerchantUpdateCustomerIgnoresIdenticalEmail(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-customer-email-identical');
+        $merchant = $this->createMerchant($merchantUser, 'Shop Customer Email 2');
+        $program = $this->createLoyaltyProgram($merchant, 'Program Customer Email 2');
+        $customer = $this->createCustomer('Readonly Customer 2', 'readonly-customer-2@example.com', null);
+        $this->createLoyaltyCard($merchant, $program, $customer);
+
+        $token = $this->createJwtFor($merchantUser);
+        $client->request(
+            'PUT',
+            '/api/customers/' . $customer->getId(),
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'email' => 'readonly-customer-2@example.com',
+                'name' => 'Customer Still Updated',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('readonly-customer-2@example.com', $payload['email']);
+        self::assertSame('Customer Still Updated', $payload['name']);
+    }
+
     public function testMerchantCannotDeleteOtherMerchantCustomer(): void
     {
         $client = static::createClient();

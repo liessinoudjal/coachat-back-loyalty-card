@@ -250,6 +250,62 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('2026-05-01T12:00:00Z', $payload['accepted_terms_accepted_at']);
     }
 
+    public function testMerchantUpdateIgnoresDifferentEmail(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('merchant-email-readonly-different');
+        $merchant = $this->createMerchant($user, 'Readonly Email Shop');
+        $token = $this->createJwtFor($user);
+        $originalEmail = $merchant->getEmail();
+
+        $client->request(
+            'PUT',
+            '/api/merchants/' . $merchant->getId()->toRfc4122(),
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'email' => 'changed@example.com',
+                'phone' => '06 55 44 33 22',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame($originalEmail, $payload['email']);
+        self::assertSame('06 55 44 33 22', $payload['phone']);
+    }
+
+    public function testMerchantUpdateIgnoresIdenticalEmail(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('merchant-email-readonly-identical');
+        $merchant = $this->createMerchant($user, 'Readonly Email Shop 2');
+        $token = $this->createJwtFor($user);
+        $originalEmail = $merchant->getEmail();
+
+        $client->request(
+            'PUT',
+            '/api/merchants/' . $merchant->getId()->toRfc4122(),
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'email' => $originalEmail,
+                'city' => 'Nantes',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame($originalEmail, $payload['email']);
+        self::assertSame('Nantes', $payload['city']);
+    }
+
     public function testMerchantCannotSetAcceptedTermsToFalse(): void
     {
         $client = static::createClient();

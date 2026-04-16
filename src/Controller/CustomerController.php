@@ -453,9 +453,6 @@ class CustomerController extends AbstractController
         if (isset($data['name'])) {
             $customer->setName($data['name']);
         }
-        if (isset($data['email'])) {
-            $customer->setEmail($data['email']);
-        }
         if (array_key_exists('phone', $data)) {
             $customer->setPhone($data['phone']);
         }
