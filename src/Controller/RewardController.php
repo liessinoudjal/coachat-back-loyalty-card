@@ -6,6 +6,7 @@ use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\Reward;
 use App\Enum\RewardStatus;
+use App\Service\NotificationService;
 use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -17,6 +18,7 @@ class RewardController extends AbstractController
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly NotificationService $notificationService,
         private readonly RewardService $rewardService,
     ) {}
 
@@ -199,6 +201,7 @@ class RewardController extends AbstractController
         }
 
         $this->entityManager->flush();
+        $this->notificationService->notifyRewardClaimed($reward);
 
         return new JsonResponse($this->formatReward($reward));
     }

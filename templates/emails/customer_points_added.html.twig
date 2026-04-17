@@ -1,0 +1,50 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ customer.name ?? 'client' }},</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:8px 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Progression</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                {% if current_value is not null and target_value is not null %}
+                                    {{ current_value }} / {{ target_value }} {{ unit_label }}
+                                {% else %}
+                                    Mise a jour enregistree
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Statut</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                {% if reward_ready %}
+                                    Votre carte est completee et une recompense vous attend.
+                                {% else %}
+                                    Votre carte a bien ete creditee.
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td>
+                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Voir mon dashboard</a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="font-size:14px; line-height:1.7; color:#6b7280;">
+        Vous pouvez suivre votre carte et vos recompenses directement depuis votre espace client.
+    </div>
+{% endblock %}

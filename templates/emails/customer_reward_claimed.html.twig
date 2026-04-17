@@ -1,0 +1,42 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ customer.name ?? 'client' }},</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:8px 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Confirmation</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Votre recompense a bien ete recuperee.
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Prochaine etape</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Creez une nouvelle carte depuis votre dashboard ou revenez lors de votre prochaine visite en magasin.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td>
+                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Retourner au dashboard</a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="font-size:14px; line-height:1.7; color:#6b7280;">
+        Merci pour votre fidelite chez {{ merchant.companyName ?? merchant.company_name ?? 'ce commerce' }}.
+    </div>
+{% endblock %}

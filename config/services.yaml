@@ -64,5 +64,14 @@ services:
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
 
+    App\Service\EmailNotificationStrategy:
+        arguments:
+            $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
+            $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
+
+    App\Service\NotificationService:
+        arguments:
+            $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
+
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

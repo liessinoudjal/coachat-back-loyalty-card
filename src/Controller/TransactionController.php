@@ -8,6 +8,7 @@ use App\Entity\LoyaltyCard;
 use App\Enum\LoyaltyProgramType;
 use App\Service\AppleWalletPushService;
 use App\Service\GoogleWalletSyncService;
+use App\Service\NotificationService;
 use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -23,6 +24,7 @@ class TransactionController extends AbstractController
         EntityManagerInterface $entityManager,
         private readonly AppleWalletPushService $appleWalletPushService,
         private readonly GoogleWalletSyncService $googleWalletSyncService,
+        private readonly NotificationService $notificationService,
         private readonly RewardService $rewardService,
     ) {
         $this->entityManager = $entityManager;
@@ -115,6 +117,10 @@ class TransactionController extends AbstractController
         if (!$previouslyCompleted && $card->isCompleted()) {
             $this->rewardService->createRewardFromCompletion($card, $transaction->getId());
             $this->entityManager->flush();
+        }
+
+        if ((int) $transaction->getPointsEarned() > 0) {
+            $this->notificationService->notifyPointsAdded($transaction);
         }
 
         $this->appleWalletPushService->notifyUpdate($card->getWalletToken());
