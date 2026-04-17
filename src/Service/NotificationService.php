@@ -4,6 +4,7 @@ namespace App\Service;
 
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
+use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\NotificationLog;
 use App\Entity\Reward;
@@ -74,6 +75,67 @@ class NotificationService
                 'reward_id' => (string) $reward->getId(),
                 'reward_description' => $reward->getRewardDescription() ?? 'Votre recompense',
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
+            ],
+        );
+    }
+
+    public function notifyCustomerSignup(Customer $customer, Merchant $merchant): void
+    {
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CUSTOMER_SIGNUP,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+            ],
+        );
+    }
+
+    public function notifyCardCreated(LoyaltyCard $card): void
+    {
+        $customer = $card->getCustomer();
+        $merchant = $card->getMerchant();
+
+        if (!$customer instanceof Customer || !$merchant instanceof Merchant) {
+            return;
+        }
+
+        $program = $card->getLoyaltyProgram();
+        $unitLabel = $program?->getType() === LoyaltyProgramType::STAMP ? 'tampons' : 'points';
+
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CARD_CREATED,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'program_name' => $program?->getName() ?? 'Carte fidelite',
+                'target_value' => $card->getTargetValue(),
+                'unit_label' => $unitLabel,
+            ],
+        );
+    }
+
+    public function notifyCardCompleted(Reward $reward): void
+    {
+        $customer = $reward->getCustomer();
+        $merchant = $reward->getMerchant();
+
+        if (!$customer instanceof Customer || !$merchant instanceof Merchant) {
+            return;
+        }
+
+        $card = $reward->getLoyaltyCard();
+        $program = $card?->getLoyaltyProgram();
+
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CARD_COMPLETED,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'reward_description' => $reward->getRewardDescription() ?? 'Votre recompense',
+                'program_name' => $program?->getName() ?? 'Carte fidelite',
             ],
         );
     }
@@ -150,6 +212,9 @@ class NotificationService
     private function buildSubject(NotificationType $type, Merchant $merchant): ?string
     {
         return match ($type) {
+            NotificationType::CUSTOMER_SIGNUP => sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CARD_CREATED => sprintf('Votre carte fidelite est prete chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CARD_COMPLETED => sprintf('Votre recompense est prete chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::POINTS_ADDED => sprintf('Votre carte a ete mise a jour chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::REWARD_CLAIMED => sprintf('Recompense recuperee chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,

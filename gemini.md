@@ -9,6 +9,8 @@ Cette API Symfony fournit un système complet de gestion de cartes de fidélité
 - Rewards (récompenses) réclamables via QR code
 - Parcours customer authentifié (Google OAuth customer + dashboard multi-marchands)
 - Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `POST /api/customers/me/cards`, `GET /api/customers/me/rewards`, `GET /api/customers/me/notification-preferences`, `GET /api/customers/me/available-programs`
+- Notifications client transactionnelles (email MVP, push préparé mais non implémenté)
+- Audit des notifications client via `notification_log`
 
 L'API utilise JWT pour l'authentification des marchands et API Platform pour la gestion des ressources.
 
@@ -251,6 +253,7 @@ Ce flow est dédié aux customers et ne fonctionne qu'avec un `merchant_ref` val
 - Crée/relie le `Customer` au `User` sans doublon (priorité : `customer.user`, fallback `customer.email` si `user` manquant)
 - Lie le customer au merchant via relation multi-marchands
 - Crée une préférence de notification par défaut activée pour ce merchant
+- En cas de nouveau rattachement customer ↔ merchant, envoie une notification de bienvenue avec lien vers le dashboard customer
 
 #### 2.d Customer Google Login Direct (sans QR)
 ```
@@ -1168,6 +1171,10 @@ Crée une nouvelle transaction et met à jour les points de la carte.
 
 Cycle de vie d'une reward : `PENDING` → `CLAIMED` (ou `CANCELLED` / `EXPIRED`).
 
+**Notifications liées aux rewards :**
+- `card_completed` : envoyée quand une carte passe à l'état complété et qu'une reward est générée
+- `reward_claimed` : envoyée après un claim réussi par QR
+
 ### Shape Reward
 
 ```json
@@ -1238,6 +1245,8 @@ Comportement :
 - Vérifie que la carte est complétée.
 - Crée la reward si absente.
 - Retourne la reward existante sinon (idempotence).
+
+**Note produit :** cet endpoint est technique. La notification customer `card_completed` est déclenchée sur les flows qui complètent réellement la carte (`POST /api/transactions` et `PATCH /api/loyalty_cards/{id}`), pas sur cet endpoint appelé isolément.
 
 ### Get Reward By Loyalty Card ID
 
@@ -1313,6 +1322,12 @@ Comportement :
 - Autorise uniquement `PENDING`.
 - Passe à `CLAIMED`, renseigne `claimed_at` et l'acteur.
 - Si déjà `CLAIMED` : `409`.
+- Déclenche ensuite une notification `reward_claimed` au customer si ses notifications sont activées pour ce merchant.
+
+**Contenu fonctionnel de la notification `reward_claimed` :**
+- message de félicitations pour la récompense récupérée
+- invitation à créer une nouvelle carte depuis le dashboard customer
+- alternative explicite : retourner directement chez le commerçant partenaire
 
 ### Admin Status Update
 
@@ -1677,6 +1692,23 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
 - `push` dépend du plan merchant (`plan.has_push_notifications`)
 - pas encore de granularité séparée email/push côté customer
 
+**Types de notifications actuellement déclenchés côté customer :**
+- `customer_signup` : bienvenue après inscription / premier rattachement au merchant
+- `card_created` : carte créée et prête à être scannée
+- `card_completed` : carte complétée, récompense prête à être récupérée
+- `points_added` : points ou tampons ajoutés
+- `reward_claimed` : récompense récupérée
+
+**Canal effectif MVP :**
+- si `plan.has_push_notifications = false` : email
+- si `plan.has_push_notifications = true` : canal push sélectionné
+- le push est préparé mais non implémenté dans ce MVP, donc l'envoi est journalisé en échec tant qu'aucun provider n'est branché
+
+**Audit des envois :**
+- chaque tentative crée une entrée dans `notification_log`
+- statuts : `pending`, `sent`, `failed`
+- données clés : `merchant_id`, `recipient_email`, `type`, `subject`, `error_message`, `created_at`, `sent_at`
+
 **Réponse GET :**
 ```json
 [
@@ -1835,6 +1867,11 @@ Crée une carte de fidélité pour le customer authentifié dans le programme de
 ```
 
 **Réponse (201) :** même format qu'un item de `GET /api/customers/me/cards`
+
+**Comportement complémentaire :**
+- crée la carte active pour le programme demandé
+- envoie une notification `card_created` si les notifications sont activées pour ce merchant
+- le message indique que la carte est prête à être scannée chez le merchant partenaire
 
 **Erreurs métier stables :**
 - `400` : `loyalty_program_id_required`

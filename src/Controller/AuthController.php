@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\User;
 use App\Entity\Merchant;
+use App\Service\NotificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,6 +29,7 @@ class AuthController extends AbstractController
     private $refreshTokenService;
     private $logger;
     private $signupAlertMailer;
+    private $notificationService;
 
     public function __construct(
         EntityManagerInterface $entityManager,
@@ -35,7 +37,8 @@ class AuthController extends AbstractController
         ClientRegistry $clientRegistry,
         RefreshTokenService $refreshTokenService,
         LoggerInterface $logger,
-        SignupAlertMailer $signupAlertMailer
+        SignupAlertMailer $signupAlertMailer,
+        NotificationService $notificationService
     ) {
         $this->entityManager = $entityManager;
         $this->jwtManager = $jwtManager;
@@ -43,6 +46,7 @@ class AuthController extends AbstractController
         $this->refreshTokenService = $refreshTokenService;
         $this->logger = $logger;
         $this->signupAlertMailer = $signupAlertMailer;
+        $this->notificationService = $notificationService;
     }
 
     #[Route('/api/auth/google', name: 'auth_google', methods: ['GET'])]
@@ -341,6 +345,7 @@ class AuthController extends AbstractController
             $this->entityManager->flush();
             if ($shouldNotifyCustomerSignup) {
                 $this->signupAlertMailer->notifyCustomerSignup($customer, $merchant);
+                $this->notificationService->notifyCustomerSignup($customer, $merchant);
             }
 
             return new JsonResponse([

@@ -72,6 +72,147 @@ final class NotificationServiceTest extends TestCase
         $service->notifyPointsAdded($transaction);
     }
 
+    public function testNotifyCustomerSignupUsesEmailWhenPushIsDisabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $merchant = $this->buildMerchant(false);
+        $customer = (new Customer())
+            ->setName('Alice')
+            ->setEmail('alice@example.com');
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(true));
+
+        $emailStrategy
+            ->expects(self::once())
+            ->method('send')
+            ->with(
+                $merchant,
+                $customer,
+                NotificationType::CUSTOMER_SIGNUP,
+                self::callback(static function (array $context): bool {
+                    return $context['dashboard_url'] === 'https://front.example.com';
+                }),
+            );
+
+        $pushStrategy->expects(self::never())->method('send');
+
+        $this->expectPersistedNotificationLog($entityManager, 1);
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyCustomerSignup($customer, $merchant);
+    }
+
+    public function testNotifyCardCreatedUsesEmailWhenPushIsDisabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $card = $this->buildCard(false);
+        $customer = $card->getCustomer();
+        $merchant = $card->getMerchant();
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(true));
+
+        $emailStrategy
+            ->expects(self::once())
+            ->method('send')
+            ->with(
+                $merchant,
+                $customer,
+                NotificationType::CARD_CREATED,
+                self::callback(static function (array $context): bool {
+                    return $context['program_name'] === 'Programme points'
+                        && $context['target_value'] === 10
+                        && $context['unit_label'] === 'points'
+                        && $context['dashboard_url'] === 'https://front.example.com';
+                }),
+            );
+
+        $pushStrategy->expects(self::never())->method('send');
+
+        $this->expectPersistedNotificationLog($entityManager, 1);
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyCardCreated($card);
+    }
+
+    public function testNotifyCardCompletedUsesEmailWhenPushIsDisabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $reward = $this->buildReward(false);
+        $customer = $reward->getCustomer();
+        $merchant = $reward->getMerchant();
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(true));
+
+        $emailStrategy
+            ->expects(self::once())
+            ->method('send')
+            ->with(
+                $merchant,
+                $customer,
+                NotificationType::CARD_COMPLETED,
+                self::callback(static function (array $context): bool {
+                    return $context['reward_description'] === 'Cafe offert'
+                        && $context['program_name'] === 'Programme points'
+                        && $context['dashboard_url'] === 'https://front.example.com';
+                }),
+            );
+
+        $pushStrategy->expects(self::never())->method('send');
+
+        $this->expectPersistedNotificationLog($entityManager, 1);
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyCardCompleted($reward);
+    }
+
     public function testNotifyRewardClaimedUsesPushWhenPlanSupportsIt(): void
     {
         $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
@@ -184,11 +325,49 @@ final class NotificationServiceTest extends TestCase
         $customer = (new Customer())
             ->setName('Alice')
             ->setEmail('alice@example.com');
+        $program = (new LoyaltyProgram())
+            ->setName('Programme points')
+            ->setType(LoyaltyProgramType::POINTS)
+            ->setPointsTarget(10)
+            ->setPointsPerEuro(1)
+            ->setRewardDescription('Cafe offert')
+            ->setMerchant($merchant);
+        $card = (new LoyaltyCard())
+            ->setMerchant($merchant)
+            ->setCustomer($customer)
+            ->setLoyaltyProgram($program)
+            ->setCurrentValue(10)
+            ->setTargetValue(10)
+            ->setIsCompleted(true);
 
         return (new Reward())
             ->setMerchant($merchant)
             ->setCustomer($customer)
+            ->setLoyaltyCard($card)
+            ->setLoyaltyProgram($program)
             ->setRewardDescription('Cafe offert');
+    }
+
+    private function buildCard(bool $pushEnabled): LoyaltyCard
+    {
+        $merchant = $this->buildMerchant($pushEnabled);
+        $customer = (new Customer())
+            ->setName('Alice')
+            ->setEmail('alice@example.com');
+        $program = (new LoyaltyProgram())
+            ->setName('Programme points')
+            ->setType(LoyaltyProgramType::POINTS)
+            ->setPointsTarget(10)
+            ->setPointsPerEuro(1)
+            ->setMerchant($merchant);
+
+        return (new LoyaltyCard())
+            ->setMerchant($merchant)
+            ->setCustomer($customer)
+            ->setLoyaltyProgram($program)
+            ->setCurrentValue(0)
+            ->setTargetValue(10)
+            ->setIsCompleted(false);
     }
 
     private function buildMerchant(bool $pushEnabled): Merchant

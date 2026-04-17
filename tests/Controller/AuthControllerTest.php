@@ -10,6 +10,7 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
+use App\Service\NotificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityRepository;
@@ -260,6 +261,7 @@ final class AuthControllerTest extends TestCase
         $refreshTokenService->method('createRefreshToken')->willReturn($refreshToken);
 
         $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+        $notificationService = $this->createMock(NotificationService::class);
 
         return new AuthController(
             $entityManager,
@@ -268,6 +270,7 @@ final class AuthControllerTest extends TestCase
             $refreshTokenService,
             new NullLogger(),
             $signupAlertMailer,
+            $notificationService,
         );
     }
 

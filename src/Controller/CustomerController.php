@@ -7,6 +7,7 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\Reward;
+use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -16,10 +17,12 @@ use Symfony\Component\Routing\Annotation\Route;
 class CustomerController extends AbstractController
 {
     private $entityManager;
+    private $notificationService;
 
-    public function __construct(EntityManagerInterface $entityManager)
+    public function __construct(EntityManagerInterface $entityManager, NotificationService $notificationService)
     {
         $this->entityManager = $entityManager;
+        $this->notificationService = $notificationService;
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
@@ -298,6 +301,7 @@ class CustomerController extends AbstractController
 
         $this->entityManager->persist($card);
         $this->entityManager->flush();
+        $this->notificationService->notifyCardCreated($card);
 
         return new JsonResponse($this->formatCustomerCard($card), 201);
     }

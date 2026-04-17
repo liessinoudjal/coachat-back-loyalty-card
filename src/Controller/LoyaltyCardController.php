@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\LoyaltyProgram;
+use App\Service\NotificationService;
 use App\Service\RewardService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -19,6 +20,7 @@ class LoyaltyCardController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly string $appBaseUrl,
         private readonly RewardService $rewardService,
+        private readonly NotificationService $notificationService,
     ) {}
 
     private function formatCard(LoyaltyCard $card): array
@@ -170,7 +172,8 @@ class LoyaltyCardController extends AbstractController
         }
 
         if (!$wasCompleted && $card->isCompleted() && $card->getCustomer() !== null) {
-            $this->rewardService->createRewardFromCompletion($card);
+            $reward = $this->rewardService->createRewardFromCompletion($card);
+            $this->notificationService->notifyCardCompleted($reward);
         }
 
         $this->entityManager->flush();

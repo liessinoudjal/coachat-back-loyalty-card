@@ -114,12 +114,15 @@ class TransactionController extends AbstractController
         $this->entityManager->persist($transaction);
         $this->entityManager->flush();
 
-        if (!$previouslyCompleted && $card->isCompleted()) {
-            $this->rewardService->createRewardFromCompletion($card, $transaction->getId());
+        $justCompleted = !$previouslyCompleted && $card->isCompleted();
+
+        if ($justCompleted) {
+            $reward = $this->rewardService->createRewardFromCompletion($card, $transaction->getId());
             $this->entityManager->flush();
+            $this->notificationService->notifyCardCompleted($reward);
         }
 
-        if ((int) $transaction->getPointsEarned() > 0) {
+        if ((int) $transaction->getPointsEarned() > 0 && !$justCompleted) {
             $this->notificationService->notifyPointsAdded($transaction);
         }
 

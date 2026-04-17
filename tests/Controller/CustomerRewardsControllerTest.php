@@ -8,9 +8,11 @@ use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
 use App\Entity\LoyaltyProgram;
 use App\Entity\Merchant;
+use App\Entity\NotificationLog;
 use App\Entity\Reward;
 use App\Entity\User;
 use App\Enum\LoyaltyProgramType;
+use App\Enum\NotificationType;
 use Doctrine\ORM\EntityManagerInterface;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -211,7 +213,10 @@ final class CustomerRewardsControllerTest extends WebTestCase
 
         $em = $this->getEntityManager();
         $rewardRepo = $em->getRepository(Reward::class);
+        $notificationLogRepo = $em->getRepository(NotificationLog::class);
         self::assertSame(1, $rewardRepo->count(['loyaltyCard' => $card]));
+        self::assertSame(1, $notificationLogRepo->count(['merchant' => $merchant, 'type' => NotificationType::CARD_COMPLETED]));
+        self::assertSame(0, $notificationLogRepo->count(['merchant' => $merchant, 'type' => NotificationType::POINTS_ADDED]));
     }
 
     private function hasTransactionAmountAddedColumn(): bool
