@@ -9,16 +9,14 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 #[ORM\Entity(repositoryClass: RewardRepository::class)]
-#[ORM\Table(name: 'reward', indexes: [
-    new ORM\Index(name: 'IDX_REWARD_MERCHANT', columns: ['merchant_id']),
-    new ORM\Index(name: 'IDX_REWARD_CUSTOMER', columns: ['customer_id']),
-    new ORM\Index(name: 'IDX_REWARD_STATUS', columns: ['status']),
-    new ORM\Index(name: 'IDX_REWARD_CLAIM_TOKEN', columns: ['claim_qr_token']),
-    new ORM\Index(name: 'IDX_REWARD_GENERATED_AT', columns: ['generated_at']),
-], uniqueConstraints: [
-    new ORM\UniqueConstraint(name: 'UNIQ_REWARD_CLAIM_QR_TOKEN', columns: ['claim_qr_token']),
-    new ORM\UniqueConstraint(name: 'UNIQ_REWARD_LOYALTY_CARD', columns: ['loyalty_card_id']),
-])]
+#[ORM\Table(name: 'reward')]
+#[ORM\Index(name: 'IDX_REWARD_MERCHANT', columns: ['merchant_id'])]
+#[ORM\Index(name: 'IDX_REWARD_CUSTOMER', columns: ['customer_id'])]
+#[ORM\Index(name: 'IDX_REWARD_STATUS', columns: ['status'])]
+#[ORM\Index(name: 'IDX_REWARD_CLAIM_TOKEN', columns: ['claim_qr_token'])]
+#[ORM\Index(name: 'IDX_REWARD_GENERATED_AT', columns: ['generated_at'])]
+#[ORM\UniqueConstraint(name: 'UNIQ_REWARD_CLAIM_QR_TOKEN', columns: ['claim_qr_token'])]
+#[ORM\UniqueConstraint(name: 'UNIQ_REWARD_LOYALTY_CARD', columns: ['loyalty_card_id'])]
 class Reward
 {
     #[ORM\Id]

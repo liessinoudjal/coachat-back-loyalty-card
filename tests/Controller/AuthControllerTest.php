@@ -11,6 +11,7 @@ use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
 use App\Service\RefreshTokenService;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
@@ -258,12 +259,15 @@ final class AuthControllerTest extends TestCase
         $refreshTokenService = $this->createMock(RefreshTokenService::class);
         $refreshTokenService->method('createRefreshToken')->willReturn($refreshToken);
 
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+
         return new AuthController(
             $entityManager,
             $jwtManager,
             $clientRegistry,
             $refreshTokenService,
             new NullLogger(),
+            $signupAlertMailer,
         );
     }
 

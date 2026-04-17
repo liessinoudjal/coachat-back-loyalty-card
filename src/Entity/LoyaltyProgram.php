@@ -168,7 +168,20 @@ class LoyaltyProgram
 
     public function setMerchant(?Merchant $merchant): static
     {
+        if ($this->merchant === $merchant) {
+            return $this;
+        }
+
+        $previousMerchant = $this->merchant;
         $this->merchant = $merchant;
+
+        if ($previousMerchant !== null && $previousMerchant->getLoyaltyPrograms()->contains($this)) {
+            $previousMerchant->removeLoyaltyProgram($this);
+        }
+
+        if ($merchant !== null && !$merchant->getLoyaltyPrograms()->contains($this)) {
+            $merchant->addLoyaltyProgram($this);
+        }
 
         return $this;
     }

@@ -176,11 +176,11 @@ final class CustomerRewardsControllerTest extends WebTestCase
 
     public function testTransactionCompletionFlowStillCreatesReward(): void
     {
+        $client = static::createClient();
+
         if (!$this->hasTransactionAmountAddedColumn()) {
             self::markTestSkipped('Skipping: test database schema is missing transaction.amount_added column.');
         }
-
-        $client = static::createClient();
 
         $merchantUser = $this->createUser('merchant-transaction', ['ROLE_USER', 'ROLE_MERCHANT']);
         $merchant = $this->createMerchant($merchantUser, 'Merchant Tx');

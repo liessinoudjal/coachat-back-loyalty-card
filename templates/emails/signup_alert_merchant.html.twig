@@ -1,0 +1,30 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Fiche merchant</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04);">
+        <tr>
+            <td style="padding:8px 20px;">
+                {% for label, value in {
+                    'Merchant ID': merchant.id,
+                    'Societe': merchant.company_name,
+                    'Email': merchant.email,
+                    'Nom contact': merchant.contact_name,
+                    'Telephone': merchant.phone,
+                    'Ville': merchant.city,
+                    'Code postal': merchant.postal_code
+                } %}
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                        <tr>
+                            <td style="padding:14px 0; border-bottom:{% if not loop.last %}1px solid #f0f0f0{% else %}0{% endif %}; vertical-align:top;">
+                                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">{{ label }}</div>
+                                <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">{{ value }}</div>
+                            </td>
+                        </tr>
+                    </table>
+                {% endfor %}
+            </td>
+        </tr>
+    </table>
+{% endblock %}

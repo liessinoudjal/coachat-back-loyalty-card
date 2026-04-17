@@ -7,6 +7,7 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\User;
 use App\Entity\Merchant;
 use App\Service\RefreshTokenService;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
 use KnpU\OAuth2ClientBundle\Client\OAuth2Client;
@@ -26,19 +27,22 @@ class AuthController extends AbstractController
     private $clientRegistry;
     private $refreshTokenService;
     private $logger;
+    private $signupAlertMailer;
 
     public function __construct(
         EntityManagerInterface $entityManager,
         JWTTokenManagerInterface $jwtManager,
         ClientRegistry $clientRegistry,
         RefreshTokenService $refreshTokenService,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        SignupAlertMailer $signupAlertMailer
     ) {
         $this->entityManager = $entityManager;
         $this->jwtManager = $jwtManager;
         $this->clientRegistry = $clientRegistry;
         $this->refreshTokenService = $refreshTokenService;
         $this->logger = $logger;
+        $this->signupAlertMailer = $signupAlertMailer;
     }
 
     #[Route('/api/auth/google', name: 'auth_google', methods: ['GET'])]
@@ -324,6 +328,7 @@ class AuthController extends AbstractController
                 $customer->setUser($user);
             }
 
+            $shouldNotifyCustomerSignup = $customer->getId() === null || !$customer->getMerchants()->contains($merchant);
             $customer->addMerchant($merchant);
             if ($customer->getMerchant() === null) {
                 $customer->setMerchant($merchant);
@@ -334,6 +339,9 @@ class AuthController extends AbstractController
             $this->entityManager->persist($user);
             $this->entityManager->persist($customer);
             $this->entityManager->flush();
+            if ($shouldNotifyCustomerSignup) {
+                $this->signupAlertMailer->notifyCustomerSignup($customer, $merchant);
+            }
 
             return new JsonResponse([
                 'token' => $this->jwtManager->create($user),

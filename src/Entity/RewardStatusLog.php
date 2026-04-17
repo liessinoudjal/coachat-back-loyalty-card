@@ -8,9 +8,8 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: RewardStatusLogRepository::class)]
-#[ORM\Table(name: 'reward_status_log', indexes: [
-    new ORM\Index(name: 'IDX_REWARD_STATUS_LOG_REWARD_DATE', columns: ['reward_id', 'changed_at']),
-])]
+#[ORM\Table(name: 'reward_status_log')]
+#[ORM\Index(name: 'IDX_REWARD_STATUS_LOG_REWARD_DATE', columns: ['reward_id', 'changed_at'])]
 class RewardStatusLog
 {
     #[ORM\Id]

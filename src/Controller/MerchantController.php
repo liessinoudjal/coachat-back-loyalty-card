@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Merchant;
 use App\Repository\PlanRepository;
 use App\Service\LegalTermsVersionProvider;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -19,12 +20,14 @@ class MerchantController extends AbstractController
     private $entityManager;
     private $planRepository;
     private LegalTermsVersionProvider $legalTermsVersionProvider;
+    private SignupAlertMailer $signupAlertMailer;
 
-    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, LegalTermsVersionProvider $legalTermsVersionProvider)
+    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
     {
         $this->entityManager = $entityManager;
         $this->planRepository = $planRepository;
         $this->legalTermsVersionProvider = $legalTermsVersionProvider;
+        $this->signupAlertMailer = $signupAlertMailer;
     }
 
     private function formatPlan(?\App\Entity\Plan $plan): ?array
@@ -218,6 +221,7 @@ class MerchantController extends AbstractController
 
         $this->entityManager->persist($merchant);
         $this->entityManager->flush();
+        $this->signupAlertMailer->notifyMerchantSignup($merchant);
 
         return new JsonResponse($this->formatMerchant($merchant), 201);
     }

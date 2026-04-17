@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ email_title }}</title>
+    <style>
+        .email-shell {
+            max-width: 680px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        .email-card-cell {
+            display: block;
+            width: 100% !important;
+            padding: 0 0 12px 0 !important;
+            box-sizing: border-box;
+        }
+
+        .email-section-cell {
+            display: block;
+            width: 100% !important;
+            padding: 0 0 16px 0 !important;
+            box-sizing: border-box;
+        }
+
+        .email-hero-copy,
+        .email-hero-badge {
+            display: block;
+            width: 100% !important;
+        }
+
+        .email-hero-badge {
+            padding-left: 0 !important;
+            padding-top: 12px !important;
+            text-align: left !important;
+        }
+
+        @media only screen and (min-width: 620px) {
+            .email-card-cell {
+                display: table-cell;
+                width: 50% !important;
+            }
+
+            .email-card-cell--left {
+                padding: 0 8px 16px 0 !important;
+            }
+
+            .email-card-cell--right {
+                padding: 0 0 16px 8px !important;
+            }
+
+            .email-section-cell {
+                display: table-cell;
+                width: 50% !important;
+            }
+
+            .email-section-cell--left {
+                padding: 0 8px 16px 0 !important;
+            }
+
+            .email-section-cell--right {
+                padding: 0 0 16px 8px !important;
+            }
+
+            .email-hero-copy {
+                display: table-cell;
+                width: auto !important;
+            }
+
+            .email-hero-badge {
+                display: table-cell;
+                width: 1% !important;
+                padding-left: 16px !important;
+                padding-top: 0 !important;
+                text-align: right !important;
+                white-space: nowrap;
+            }
+        }
+    </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f5f5f5; font-family:Arial, Helvetica, sans-serif; color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5; margin:0; padding:24px 0; width:100%;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" class="email-shell" style="max-width:680px; width:100%; margin:0 auto;">
+                    <tr>
+                        <td style="padding:0 16px 24px 16px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:18px; overflow:hidden; box-shadow:0 8px 30px rgba(37,99,235,0.08);">
+                                <tr>
+                                    <td style="padding:22px 20px 18px 20px; background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); border-bottom:1px solid #e5e7eb;">
+                                        <div style="margin-bottom:18px;">
+                                            <img src="{{ email_brand_logo_url }}" alt="Coachat" style="display:block; height:44px; width:auto; max-width:160px;">
+                                        </div>
+                                        <div style="font-size:12px; line-height:1; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; color:#2563eb; margin-bottom:14px;">{{ email_eyebrow }}</div>
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td class="email-hero-copy" style="vertical-align:top;">
+                                                    <div style="font-size:28px; line-height:1.2; font-weight:700; color:#111827; margin-bottom:10px;">{{ email_title }}</div>
+                                                    <div style="font-size:15px; line-height:1.6; color:#6b7280;">{{ summary }}</div>
+                                                </td>
+                                                <td align="right" class="email-hero-badge" style="vertical-align:top; padding-left:16px;">
+                                                    <span style="display:inline-block; background-color:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; border-radius:999px; padding:8px 14px; font-size:12px; font-weight:700; white-space:nowrap;">{{ email_accent }}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+
+                                <tr>
+                                    <td style="padding:20px 20px 8px 20px;">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td class="email-card-cell email-card-cell--left" style="width:50%; padding:0 8px 16px 0; vertical-align:top;">
+                                                    <div style="background-color:#ffffff; border:1px solid #dbeafe; border-radius:14px; padding:18px; box-shadow:0 4px 14px rgba(37,99,235,0.06);">
+                                                        <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#6b7280; margin-bottom:10px;">{{ primary_label }}</div>
+                                                        <div style="font-size:24px; line-height:1.3; font-weight:700; color:#2563eb; word-break:break-word;">{{ primary_value }}</div>
+                                                    </div>
+                                                </td>
+                                                <td class="email-card-cell email-card-cell--right" style="width:50%; padding:0 0 16px 8px; vertical-align:top;">
+                                                    <div style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px; box-shadow:0 1px 6px rgba(17,24,39,0.05);">
+                                                        <div style="font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#6b7280; margin-bottom:10px;">{{ secondary_label }}</div>
+                                                        <div style="font-size:20px; line-height:1.35; font-weight:700; color:#111827; word-break:break-word;">{{ secondary_value }}</div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+
+                                <tr>
+                                    <td style="padding:8px 20px 22px 20px;">
+                                        {% block email_body %}{% endblock %}
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <div style="padding:16px 4px 0 4px; font-size:12px; line-height:1.5; color:#9ca3af; text-align:center;">
+                                Notification automatique Coachat.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

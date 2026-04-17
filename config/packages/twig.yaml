@@ -1,5 +1,7 @@
 twig:
     file_name_pattern: '*.twig'
+    globals:
+        email_brand_logo_url: '%env(APP_FRONT_BASE_URL)%/logo.png'
 
 when@test:
     twig:
