@@ -193,6 +193,93 @@ final class AuthControllerTest extends TestCase
         self::assertSame($capturedCustomer, $capturedPreference->getCustomer());
     }
 
+    public function testCustomerQrSignupDispatchesSignupNotifications(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('QR Merchant');
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(fn () => null),
+            merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            notificationPreferenceRepository: $this->createNotificationPreferenceRepository(fn () => null),
+        );
+
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+        $signupAlertMailer
+            ->expects(self::once())
+            ->method('notifyCustomerSignup')
+            ->with(
+                self::isInstanceOf(Customer::class),
+                self::identicalTo($merchant),
+            );
+
+        $notificationService = $this->createMock(NotificationService::class);
+        $notificationService
+            ->expects(self::once())
+            ->method('notifyCustomerSignup')
+            ->with(
+                self::isInstanceOf(Customer::class),
+                self::identicalTo($merchant),
+            );
+
+        $controller = $this->createControllerWithEntityManager(
+            $entityManager,
+            $signupAlertMailer,
+            $notificationService,
+        );
+
+        $response = $controller->googleCustomerCallback($this->createCallbackRequest(['merchant_ref' => $merchantRef]));
+
+        self::assertSame(200, $response->getStatusCode());
+    }
+
+    public function testCustomerQrSignupDoesNotDispatchNotificationsWhenAlreadyAttachedToMerchant(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('QR Merchant');
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $existingCustomer = (new Customer())
+            ->setName('Existing Customer')
+            ->setEmail('user@example.com')
+            ->setMerchant($merchant);
+        $existingCustomer->addMerchant($merchant);
+        $this->forceEntityId($existingCustomer, 42);
+
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(fn (array $criteria) => ($criteria['email'] ?? null) === 'user@example.com' ? $existingCustomer : null),
+            merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            notificationPreferenceRepository: $this->createNotificationPreferenceRepository(fn () => null),
+        );
+
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+        $signupAlertMailer
+            ->expects(self::never())
+            ->method('notifyCustomerSignup');
+
+        $notificationService = $this->createMock(NotificationService::class);
+        $notificationService
+            ->expects(self::never())
+            ->method('notifyCustomerSignup');
+
+        $controller = $this->createControllerWithEntityManager(
+            $entityManager,
+            $signupAlertMailer,
+            $notificationService,
+        );
+
+        $response = $controller->googleCustomerCallback($this->createCallbackRequest(['merchant_ref' => $merchantRef]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame($merchantRef, $payload['customer']['merchant_ref']);
+    }
+
     public function testCustomerQrAuthReturnsAuthorizationPayloadWithMerchantRef(): void
     {
         $merchant = new Merchant();
@@ -234,7 +321,11 @@ final class AuthControllerTest extends TestCase
         );
     }
 
-    private function createControllerWithEntityManager(EntityManagerInterface $entityManager): AuthController
+    private function createControllerWithEntityManager(
+        EntityManagerInterface $entityManager,
+        ?SignupAlertMailer $signupAlertMailer = null,
+        ?NotificationService $notificationService = null,
+    ): AuthController
     {
         $provider = $this->createMock(AbstractProvider::class);
         $provider->method('getAccessToken')->willReturn(new AccessToken(['access_token' => 'google-access-token']));
@@ -260,8 +351,8 @@ final class AuthControllerTest extends TestCase
         $refreshTokenService = $this->createMock(RefreshTokenService::class);
         $refreshTokenService->method('createRefreshToken')->willReturn($refreshToken);
 
-        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
-        $notificationService = $this->createMock(NotificationService::class);
+        $signupAlertMailer ??= $this->createMock(SignupAlertMailer::class);
+        $notificationService ??= $this->createMock(NotificationService::class);
 
         return new AuthController(
             $entityManager,
@@ -353,6 +444,14 @@ final class AuthControllerTest extends TestCase
         $user->setGoogleId($googleId);
 
         return $user;
+    }
+
+    private function forceEntityId(object $entity, int $id): void
+    {
+        $reflection = new \ReflectionObject($entity);
+        $property = $reflection->getProperty('id');
+        $property->setAccessible(true);
+        $property->setValue($entity, $id);
     }
 
     private function createCallbackRequest(array $extraPayload = []): Request

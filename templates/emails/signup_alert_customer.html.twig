@@ -12,7 +12,7 @@
                                 'Customer ID': customer.id,
                                 'Email': customer.email,
                                 'Nom': customer.name,
-                                'Telephone': customer.phone
+                                'Téléphone': customer.phone
                             } %}
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                                     <tr>
@@ -28,12 +28,12 @@
                 </table>
             </td>
             <td class="email-section-cell email-section-cell--right" style="width:50%; padding:0 0 16px 8px; vertical-align:top;">
-                <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:14px;">Merchant</div>
+                <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:14px;">Commerçant</div>
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #dbeafe; border-radius:16px; box-shadow:0 4px 14px rgba(37,99,235,0.06);">
                     <tr>
                         <td style="padding:8px 20px;">
                             {% for label, value in {
-                                'Nom merchant': merchant.company_name,
+                                'Nom commerçant': merchant.company_name,
                                 'Merchant ID': merchant.id
                             } %}
                                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">

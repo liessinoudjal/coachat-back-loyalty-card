@@ -68,20 +68,21 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
-            sprintf('Bienvenue chez %s. Votre inscription est maintenant terminee.', $merchant->getCompanyName() ?? 'ce commerce'),
-            'Votre espace client est pret pour suivre vos cartes, vos points et vos recompenses.',
-            $dashboardUrl !== '' ? sprintf('Acceder a mon dashboard: %s', $dashboardUrl) : null,
+            sprintf('Bienvenue chez %s. Votre inscription est maintenant terminée.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'Votre espace client est prêt pour suivre vos cartes, vos points et vos récompenses.',
+            'Vous pouvez maintenant choisir une carte de fidélité du commerçant depuis votre espace client carte ou demander au commerçant de vous en attribuer une.',
+            $dashboardUrl !== '' ? sprintf('Accéder à mon dashboard : %s', $dashboardUrl) : null,
         ]);
 
         $html = $this->twig->render('emails/customer_signup_welcome.html.twig', [
             'email_title' => 'Bienvenue sur Coachat',
             'email_eyebrow' => 'Bienvenue client',
             'email_accent' => 'BIENVENUE',
-            'summary' => sprintf('Votre inscription chez %s est confirmee. Vous pouvez maintenant acceder a votre espace client.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'summary' => sprintf('Votre inscription chez %s est confirmée. Vous pouvez maintenant accéder à votre espace client.', $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $customer->getName() ?? 'Client',
             'primary_label' => 'Compte',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
-            'secondary_label' => 'Merchant',
+            'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
@@ -102,29 +103,29 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildCardCreatedEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $programName = (string) ($context['program_name'] ?? 'Carte fidelite');
+        $programName = (string) ($context['program_name'] ?? 'Carte fidélité');
         $targetValue = $context['target_value'] ?? null;
         $unitLabel = (string) ($context['unit_label'] ?? 'points');
-        $subject = sprintf('Votre carte fidelite est prete chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre carte fidélité est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
             sprintf('Votre carte "%s" est maintenant active chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
-            'Vous pouvez des maintenant la faire scanner lors de votre prochaine visite chez ce merchant partenaire.',
-            $targetValue !== null ? sprintf('Objectif: %s %s', $targetValue, $unitLabel) : null,
-            $dashboardUrl !== '' ? sprintf('Voir mon dashboard: %s', $dashboardUrl) : null,
+            'Vous pouvez dès maintenant la faire scanner lors de votre prochaine visite chez ce commerçant partenaire.',
+            $targetValue !== null ? sprintf('Objectif : %s %s', $targetValue, $unitLabel) : null,
+            $dashboardUrl !== '' ? sprintf('Voir mon dashboard : %s', $dashboardUrl) : null,
         ]);
 
         $html = $this->twig->render('emails/customer_card_created.html.twig', [
             'email_title' => 'Carte activée',
             'email_eyebrow' => 'Nouvelle carte',
-            'email_accent' => 'CARTE PRETE',
-            'summary' => sprintf('Votre carte "%s" est prete. Vous pouvez maintenant la faire scanner chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
+            'email_accent' => 'CARTE PRÊTE',
+            'summary' => sprintf('Votre carte "%s" est prête. Vous pouvez maintenant la faire scanner chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $programName,
             'primary_label' => 'Programme',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
-            'secondary_label' => 'Merchant',
+            'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
@@ -148,27 +149,27 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildCardCompletedEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $rewardDescription = (string) ($context['reward_description'] ?? 'Votre recompense');
-        $programName = (string) ($context['program_name'] ?? 'Carte fidelite');
-        $subject = sprintf('Votre recompense est prete chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
+        $programName = (string) ($context['program_name'] ?? 'Carte fidélité');
+        $subject = sprintf('Votre récompense est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
-            sprintf('Votre carte "%s" est completee chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
-            sprintf('Bonne nouvelle, votre recompense "%s" est prete a etre recuperee.', $rewardDescription),
-            $dashboardUrl !== '' ? sprintf('Voir mon dashboard: %s', $dashboardUrl) : null,
+            sprintf('Votre carte "%s" est complétée chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
+            sprintf('Bonne nouvelle, votre récompense "%s" est prête à être récupérée.', $rewardDescription),
+            $dashboardUrl !== '' ? sprintf('Voir mon dashboard : %s', $dashboardUrl) : null,
         ]);
 
         $html = $this->twig->render('emails/customer_card_completed.html.twig', [
-            'email_title' => 'Recompense prete',
-            'email_eyebrow' => 'Carte completee',
-            'email_accent' => 'RECOMPENSE PRETE',
-            'summary' => sprintf('Votre carte "%s" est completee. Votre recompense "%s" est maintenant prete a etre recuperee.', $programName, $rewardDescription),
+            'email_title' => 'Récompense prête',
+            'email_eyebrow' => 'Carte complétée',
+            'email_accent' => 'RÉCOMPENSE PRÊTE',
+            'summary' => sprintf('Votre carte "%s" est complétée. Votre récompense "%s" est maintenant prête à être récupérée.', $programName, $rewardDescription),
             'primary_value' => $rewardDescription,
-            'primary_label' => 'Recompense',
+            'primary_label' => 'Récompense',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
-            'secondary_label' => 'Merchant',
+            'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
@@ -197,26 +198,26 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $targetValue = $context['target_value'] ?? null;
         $rewardReady = (bool) ($context['reward_ready'] ?? false);
 
-        $subject = sprintf('Votre carte %s a ete mise a jour chez %s', $unitLabel, $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre carte %s a été mise à jour chez %s', $unitLabel, $merchant->getCompanyName() ?? 'Coachat');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
-            sprintf('%d %s ont ete ajoutes a votre carte chez %s.', $valueAdded, $unitLabel, $merchant->getCompanyName() ?? 'ce commerce'),
+            sprintf('%d %s ont été ajoutés à votre carte chez %s.', $valueAdded, $unitLabel, $merchant->getCompanyName() ?? 'ce commerce'),
             $currentValue !== null && $targetValue !== null ? sprintf('Progression: %s / %s', $currentValue, $targetValue) : null,
-            $rewardReady ? 'Votre carte est completee et une recompense vous attend.' : null,
-            $dashboardUrl !== '' ? sprintf('Voir mon dashboard: %s', $dashboardUrl) : null,
+            $rewardReady ? 'Votre carte est complétée et une récompense vous attend.' : null,
+            $dashboardUrl !== '' ? sprintf('Voir mon dashboard : %s', $dashboardUrl) : null,
         ]);
 
         $html = $this->twig->render('emails/customer_points_added.html.twig', [
-            'email_title' => 'Carte mise a jour',
+            'email_title' => 'Carte mise à jour',
             'email_eyebrow' => 'Notification client',
             'email_accent' => strtoupper($unitLabel),
-            'summary' => sprintf('%d %s ont ete ajoutes a votre carte chez %s.', $valueAdded, $unitLabel, $merchant->getCompanyName() ?? 'ce commerce'),
+            'summary' => sprintf('%d %s ont été ajoutés à votre carte chez %s.', $valueAdded, $unitLabel, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => sprintf('%d %s', $valueAdded, $unitLabel),
-            'primary_label' => 'Ajoutes',
+            'primary_label' => 'Ajoutés',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
-            'secondary_label' => 'Merchant',
+            'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
@@ -241,28 +242,28 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildRewardClaimedEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $rewardDescription = (string) ($context['reward_description'] ?? 'Votre recompense');
+        $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
 
-        $subject = sprintf('Recompense recuperee chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
-            sprintf('Bravo pour votre recompense "%s", recuperee chez %s.', $rewardDescription, $merchant->getCompanyName() ?? 'ce commerce'),
-            'Nous esperons bientot vous revoir chez notre commercant partenaire.',
-            $dashboardUrl !== '' ? sprintf('Creez une nouvelle carte depuis votre dashboard: %s', $dashboardUrl) : null,
-            'Vous pouvez aussi vous rendre directement chez le commercant partenaire pour relancer votre parcours.',
+            sprintf('Bravo pour votre récompense "%s", récupérée chez %s.', $rewardDescription, $merchant->getCompanyName() ?? 'ce commerce'),
+            'Nous espérons bientôt vous revoir chez notre commerçant partenaire.',
+            $dashboardUrl !== '' ? sprintf('Créez une nouvelle carte depuis votre dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez aussi vous rendre directement chez le commerçant partenaire pour relancer votre parcours.',
         ]);
 
         $html = $this->twig->render('emails/customer_reward_claimed.html.twig', [
-            'email_title' => 'Recompense recuperee',
+            'email_title' => 'Récompense récupérée',
             'email_eyebrow' => 'Notification client',
-            'email_accent' => 'RECOMPENSE',
-            'summary' => sprintf('Votre recompense "%s" a bien ete recuperee chez %s.', $rewardDescription, $merchant->getCompanyName() ?? 'ce commerce'),
+            'email_accent' => 'RÉCOMPENSE',
+            'summary' => sprintf('Votre récompense "%s" a bien été récupérée chez %s.', $rewardDescription, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $rewardDescription,
-            'primary_label' => 'Recompense',
+            'primary_label' => 'Récompense',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
-            'secondary_label' => 'Merchant',
+            'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
