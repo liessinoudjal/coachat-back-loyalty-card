@@ -33,6 +33,77 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
         $this->getEntityManager()->flush();
     }
 
+    public function findOneByGoogleLogin(string $googleId, string $email): ?User
+    {
+        $normalizedEmail = mb_strtolower(trim($email));
+
+        $users = $this->createQueryBuilder('u')
+            ->andWhere('u.googleId = :googleId OR LOWER(u.email) = :email')
+            ->setParameter('googleId', trim($googleId))
+            ->setParameter('email', $normalizedEmail)
+            ->orderBy('u.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        foreach ($users as $user) {
+            if (!$user instanceof User) {
+                continue;
+            }
+
+            if ($user->getGoogleId() === trim($googleId)) {
+                return $user;
+            }
+        }
+
+        foreach ($users as $user) {
+            if (!$user instanceof User) {
+                continue;
+            }
+
+            if (mb_strtolower((string) $user->getEmail()) === $normalizedEmail) {
+                return $user;
+            }
+        }
+
+        return null;
+    }
+
+    public function findOneSuperAdminByGoogleLogin(string $googleId, string $email): ?User
+    {
+        $users = $this->createQueryBuilder('u')
+            ->andWhere('u.googleId = :googleId OR LOWER(u.email) = :email')
+            ->setParameter('googleId', trim($googleId))
+            ->setParameter('email', mb_strtolower(trim($email)))
+            ->orderBy('u.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        foreach ($users as $user) {
+            if (!$user instanceof User) {
+                continue;
+            }
+
+            if (in_array('ROLE_SUPER_ADMIN', $user->getRoles(), true) && $user->getGoogleId() === trim($googleId)) {
+                return $user;
+            }
+        }
+
+        foreach ($users as $user) {
+            if (!$user instanceof User) {
+                continue;
+            }
+
+            if (
+                in_array('ROLE_SUPER_ADMIN', $user->getRoles(), true)
+                && mb_strtolower((string) $user->getEmail()) === mb_strtolower(trim($email))
+            ) {
+                return $user;
+            }
+        }
+
+        return null;
+    }
+
     //    /**
     //     * @return User[] Returns an array of User objects
     //     */

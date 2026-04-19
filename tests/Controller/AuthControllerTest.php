@@ -68,6 +68,52 @@ final class AuthControllerTest extends TestCase
         self::assertSame('merchant_not_found_for_login', $payload['error']);
     }
 
+    public function testSuperAdminLoginWithoutMerchantReturnsTokensAndBindsGoogleIdByEmail(): void
+    {
+        $user = $this->createUser('user@example.com', ['ROLE_USER', 'ROLE_SUPER_ADMIN'], '');
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => match (true) {
+                isset($criteria['googleId']) => null,
+                ($criteria['email'] ?? null) === 'user@example.com' => $user,
+                default => null,
+            }),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleMerchantLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertContains('ROLE_SUPER_ADMIN', $user->getRoles());
+        self::assertNotContains('ROLE_MERCHANT', $user->getRoles());
+        self::assertSame('google-id', $user->getGoogleId());
+    }
+
+    public function testSuperAdminLoginWithoutMerchantReturnsTokensWhenMatchedByGoogleId(): void
+    {
+        $user = $this->createUser('admin@example.com', ['ROLE_USER', 'ROLE_SUPER_ADMIN'], 'google-id');
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => match (true) {
+                ($criteria['googleId'] ?? null) === 'google-id' => $user,
+                default => null,
+            }),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleMerchantLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertContains('ROLE_SUPER_ADMIN', $user->getRoles());
+        self::assertNotContains('ROLE_MERCHANT', $user->getRoles());
+    }
+
     public function testMerchantRegisterWithNewAccountReturnsTokens(): void
     {
         $capturedUser = null;

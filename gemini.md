@@ -71,6 +71,7 @@ Le JWT émis par le backend contient les claims standards suivants :
 **Règles de rôles :**
 - login/signup merchant : `roles` contient au minimum `ROLE_MERCHANT` et `ROLE_USER`
 - login/signup customer : `roles` contient au minimum `ROLE_CUSTOMER` et `ROLE_USER`
+- super admin : `roles` contient `ROLE_SUPER_ADMIN`, qui hérite de `ROLE_MERCHANT`
 - si un même compte cumule les deux parcours, le JWT peut contenir `ROLE_MERCHANT`, `ROLE_CUSTOMER`, `ROLE_USER`
 
 **Consigne frontend :**
@@ -79,6 +80,7 @@ Le JWT émis par le backend contient les claims standards suivants :
 - après login :
   - merchant : appeler `GET /api/merchants/me`
   - customer : appeler `GET /api/customers/me/bootstrap`
+  - super admin : le login passe par les mêmes endpoints merchant, puis appeler `GET /api/super-admin/me`
 
 #### 1. Merchant Google Login
 ```
@@ -87,6 +89,10 @@ POST /api/auth/merchant/google/login/callback
 ```
 
 Flow dédié à la connexion merchant existante.
+
+**Cas super admin :** un super admin s'authentifie via les mêmes endpoints merchant, car `ROLE_SUPER_ADMIN` hérite de `ROLE_MERCHANT`. Le frontend admin doit ensuite consommer les endpoints `/api/super-admin/*`.
+
+**Résolution du compte super admin au login :** le backend cherche d'abord un user super admin par `google_id`. Si aucun match n'existe encore, il cherche par `email`. Si un compte `ROLE_SUPER_ADMIN` est trouvé, aucun profil `Merchant` n'est requis pour autoriser la connexion.
 
 **GET login :**
 - Paramètre requis : `redirect_uri`
@@ -426,6 +432,246 @@ Retourne le commerçant connecté avec plan + compteurs.
 **Champs calculés** :
 - `active_loyalty_program_count` : nombre de programmes de fidélité actifs pour le commerçant connecté
 - `plan` : plan actif du commerçant (null si aucun plan assigné)
+
+## Super Admin
+
+Contexte : première brique du dashboard d'administration du site.
+
+Le super admin s'authentifie via les mêmes endpoints Google merchant que les merchants classiques :
+- `GET /api/auth/merchant/google/login`
+- `POST /api/auth/merchant/google/login/callback`
+
+La différence se fait ensuite via le rôle `ROLE_SUPER_ADMIN`, qui hérite de `ROLE_MERCHANT`.
+
+Un super admin n'a pas besoin d'être lié à une entité `Merchant`. Il peut être créé directement en base avec `ROLE_SUPER_ADMIN`, puis être rattaché à son compte Google au premier login via l'email. Le champ `google_id` peut donc être vide avant la première connexion Google.
+
+En V1, les endpoints super admin sont strictement en lecture seule.
+
+### Get Current Super Admin
+```
+GET /api/super-admin/me
+```
+
+Retourne le profil du super admin authentifié. Le champ `merchant` peut être `null` si le super admin n'est lié à aucun merchant, ce qui est le comportement nominal pour l'administration du site.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Accès :**
+- `ROLE_SUPER_ADMIN`
+
+**Réponse :**
+```json
+{
+  "id": 12,
+  "email": "admin@example.com",
+  "name": "Admin Site",
+  "google_id": null,
+  "roles": ["ROLE_USER", "ROLE_SUPER_ADMIN"],
+  "is_super_admin": true,
+  "merchant": null
+}
+```
+
+Exemple si le super admin est aussi rattaché à un merchant :
+```json
+{
+  "id": 12,
+  "email": "admin@example.com",
+  "name": "Admin Site",
+  "google_id": "google-user-id",
+  "roles": ["ROLE_USER", "ROLE_SUPER_ADMIN"],
+  "is_super_admin": true,
+  "merchant": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "company_name": "Admin Merchant",
+    "email": "admin@example.com",
+    "phone": null,
+    "address": null,
+    "postal_code": "75000",
+    "city": "Paris",
+    "logo_url": null,
+    "stripe_customer_id": null,
+    "trial_ends_at": "2026-05-15T10:15:00Z",
+    "current_period_start_at": null,
+    "current_period_end_at": null,
+    "accepted_terms": true,
+    "accepted_terms_version": "2026-04-15",
+    "accepted_terms_accepted_at": "2026-04-15T10:15:00Z",
+    "subscription_status": "trial",
+    "active_loyalty_program_count": 0,
+    "loyalty_program_count": 0,
+    "loyalty_card_count": 0,
+    "transaction_count": 0,
+    "reward_count": 0,
+    "plan": null,
+    "user": {
+      "id": 12,
+      "email": "admin@example.com",
+      "name": "Admin Site",
+      "roles": ["ROLE_USER", "ROLE_SUPER_ADMIN"]
+    }
+  }
+}
+```
+
+**Erreurs :**
+- `403` si l'utilisateur n'a pas `ROLE_SUPER_ADMIN`
+
+### List All Merchants For Super Admin
+```
+GET /api/super-admin/merchants
+```
+
+Retourne tous les merchants et leurs données principales en lecture seule.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Accès :**
+- `ROLE_SUPER_ADMIN`
+
+**Réponse :**
+```json
+{
+  "items": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "company_name": "Alpha Shop",
+      "email": "alpha@example.com",
+      "phone": null,
+      "address": null,
+      "postal_code": "75000",
+      "city": "Paris",
+      "logo_url": null,
+      "stripe_customer_id": null,
+      "trial_ends_at": "2026-05-15T10:15:00Z",
+      "current_period_start_at": null,
+      "current_period_end_at": null,
+      "accepted_terms": true,
+      "accepted_terms_version": "2026-04-15",
+      "accepted_terms_accepted_at": "2026-04-15T10:15:00Z",
+      "subscription_status": "trial",
+      "active_loyalty_program_count": 0,
+      "loyalty_program_count": 0,
+      "loyalty_card_count": 0,
+      "transaction_count": 0,
+      "reward_count": 0,
+      "plan": null,
+      "user": {
+        "id": 18,
+        "email": "alpha@example.com",
+        "name": "Owner Alpha",
+        "roles": ["ROLE_USER", "ROLE_MERCHANT"]
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+**Notes V1 :**
+- pas de pagination en première version
+- pas d'écriture ni d'édition via ces routes
+- la liste est ordonnée par `company_name ASC`
+
+### Get Merchant Loyalty Programs For Super Admin
+```
+GET /api/super-admin/merchants/{merchantId}/loyalty-programs
+```
+
+Retourne les programmes de fidélité d'un merchant tiers pour le dashboard admin, avec les informations utiles au présentoir fidélité.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Accès :**
+- `ROLE_SUPER_ADMIN`
+
+**Réponse :**
+```json
+{
+  "merchant": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "company_name": "Alpha Shop",
+    "logo_url": null,
+    "city": "Paris",
+    "subscription_status": "trial",
+    "merchant_ref": "550e8400-e29b-41d4-a716-446655440000",
+    "customer_signup_qr_value": "550e8400-e29b-41d4-a716-446655440000"
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "Coffee Program",
+      "description": null,
+      "type": "STAMP",
+      "points_per_euro": null,
+      "points_target": null,
+      "stamp_target": 10,
+      "reward_description": "1 cafe offert",
+      "is_active": true,
+      "loyalty_card_count": 0,
+      "reward_count": 0
+    }
+  ],
+  "total": 1
+}
+```
+
+**Notes V1 :**
+- `merchant_ref` et `customer_signup_qr_value` correspondent à l'UUID merchant à encoder dans le QR du parcours customer
+- pas de pagination en première version
+- liste ordonnée par `name ASC`
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `403` si l'utilisateur n'a pas `ROLE_SUPER_ADMIN`
+
+### Get Merchant Google Review Module For Super Admin
+```
+GET /api/super-admin/merchants/{merchantId}/google-review-module
+```
+
+Retourne la configuration du module Avis Google d'un merchant tiers pour le dashboard admin.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Accès :**
+- `ROLE_SUPER_ADMIN`
+
+**Réponse :**
+```json
+{
+  "id": "uuid-module",
+  "merchant_id": "uuid-merchant",
+  "merchant_name": "Review Shop",
+  "merchant_logo_url": null,
+  "is_enabled": true,
+  "display_name": "Avis Google",
+  "google_review_url": "https://g.page/r/review-shop/review",
+  "show_in_customer_dashboard": true,
+  "show_qr_code": true,
+  "reward_options": [
+    {
+      "id": "uuid-option",
+      "label": "Cafe offert",
+      "description": null,
+      "active": true,
+      "order": 1
+    }
+  ],
+  "is_configuration_complete": true,
+  "created_at": "2026-04-19T12:00:00+00:00",
+  "updated_at": "2026-04-19T12:00:00+00:00"
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_module_not_found`
+- `403` si l'utilisateur n'a pas `ROLE_SUPER_ADMIN`
 
 
 ### Create Merchant

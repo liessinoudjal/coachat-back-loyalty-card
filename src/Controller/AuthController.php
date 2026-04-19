@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\User;
 use App\Entity\Merchant;
+use App\Repository\UserRepository;
 use App\Service\NotificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
@@ -158,23 +159,28 @@ class AuthController extends AbstractController
 
         try {
             $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
-            $user = $this->upsertGoogleUser($googleUser);
+            $superAdminUser = $this->findSuperAdminUserForMerchantLogin($googleUser);
+            $user = $superAdminUser ?? $this->upsertGoogleUser($googleUser);
+            $this->syncGoogleIdentity($user, $googleUser);
+            $isSuperAdmin = $superAdminUser !== null || $this->isSuperAdminUser($user);
 
-            if ($this->isCustomerOnlyUser($user)) {
+            if ($this->isCustomerOnlyUser($user) && !$isSuperAdmin) {
                 return new JsonResponse([
                     'error' => 'account_already_customer',
                     'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
                 ], 409);
             }
 
-            if ($user->getMerchant() === null) {
+            if ($user->getMerchant() === null && !$isSuperAdmin) {
                 return new JsonResponse([
                     'error' => 'merchant_not_found_for_login',
                     'message' => 'No merchant account is linked to this Google account. Please register first.',
                 ], 403);
             }
 
-            $this->ensureUserRole($user, 'ROLE_MERCHANT');
+            if (!$isSuperAdmin) {
+                $this->ensureUserRole($user, 'ROLE_MERCHANT');
+            }
             $this->entityManager->persist($user);
             $this->entityManager->flush();
 
@@ -436,27 +442,86 @@ class AuthController extends AbstractController
 
     private function upsertGoogleUser(GoogleUser $googleUser): User
     {
-        $user = $this->entityManager->getRepository(User::class)->findOneBy(['googleId' => $googleUser->getId()]);
-
-        if (!$user) {
-            $user = $this->entityManager->getRepository(User::class)->findOneBy(['email' => $googleUser->getEmail()]);
-        }
+        $user = $this->findUserByGoogleLogin($googleUser);
 
         if (!$user) {
             $user = new User();
-            $user->setEmail((string) $googleUser->getEmail());
+            $user->setEmail($this->normalizeGoogleEmail((string) $googleUser->getEmail()));
             $user->setRoles(['ROLE_USER']);
         }
 
+        $this->syncGoogleIdentity($user, $googleUser);
+
+        return $user;
+    }
+
+    private function syncGoogleIdentity(User $user, GoogleUser $googleUser): void
+    {
         if (!$user->getGoogleId()) {
-            $user->setGoogleId((string) $googleUser->getId());
+            $user->setGoogleId(trim((string) $googleUser->getId()));
+        }
+
+        if (!$user->getEmail()) {
+            $user->setEmail($this->normalizeGoogleEmail((string) $googleUser->getEmail()));
         }
 
         if (!$user->getName()) {
             $user->setName((string) ($googleUser->getName() ?? $googleUser->getEmail()));
         }
+    }
 
-        return $user;
+    private function findUserByGoogleLogin(GoogleUser $googleUser): ?User
+    {
+        $userRepository = $this->entityManager->getRepository(User::class);
+        $googleId = trim((string) $googleUser->getId());
+        $email = $this->normalizeGoogleEmail((string) $googleUser->getEmail());
+
+        if ($userRepository instanceof UserRepository) {
+            return $userRepository->findOneByGoogleLogin($googleId, $email);
+        }
+
+        $user = $userRepository->findOneBy(['googleId' => $googleId]);
+        if ($user instanceof User) {
+            return $user;
+        }
+
+        $user = $userRepository->findOneBy(['email' => $email]);
+        if ($user instanceof User) {
+            return $user;
+        }
+
+        $lowercaseEmail = mb_strtolower($email);
+        if ($lowercaseEmail !== $email) {
+            $user = $userRepository->findOneBy(['email' => $lowercaseEmail]);
+            if ($user instanceof User) {
+                return $user;
+            }
+        }
+
+        return null;
+    }
+
+    private function findSuperAdminUserForMerchantLogin(GoogleUser $googleUser): ?User
+    {
+        $userRepository = $this->entityManager->getRepository(User::class);
+        $googleId = trim((string) $googleUser->getId());
+        $email = $this->normalizeGoogleEmail((string) $googleUser->getEmail());
+
+        if ($userRepository instanceof UserRepository) {
+            return $userRepository->findOneSuperAdminByGoogleLogin($googleId, $email);
+        }
+
+        $user = $this->findUserByGoogleLogin($googleUser);
+        if ($user instanceof User && $this->isSuperAdminUser($user)) {
+            return $user;
+        }
+
+        return null;
+    }
+
+    private function normalizeGoogleEmail(string $email): string
+    {
+        return mb_strtolower(trim($email));
     }
 
     private function ensureUserRole(User $user, string $role): void
@@ -556,6 +621,11 @@ class AuthController extends AbstractController
     private function isCustomerOnlyUser(User $user): bool
     {
         return $user->getCustomer() !== null && $user->getMerchant() === null;
+    }
+
+    private function isSuperAdminUser(User $user): bool
+    {
+        return in_array('ROLE_SUPER_ADMIN', $user->getRoles(), true);
     }
 
     private function canBindCustomerToUser(Customer $customer, User $user): bool
