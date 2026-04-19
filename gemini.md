@@ -7,6 +7,7 @@ Cette API Symfony fournit un système complet de gestion de cartes de fidélité
 - Authentification via Google OAuth2 + JWT
 - Gestion des commerçants, programmes de fidélité, cartes, transactions, clients
 - Rewards (récompenses) réclamables via QR code
+- Module Avis Google merchant/customer avec session de parcours, spin et récompense QR mono-usage
 - Parcours customer authentifié (Google OAuth customer + dashboard multi-marchands)
 - Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `POST /api/customers/me/cards`, `GET /api/customers/me/rewards`, `GET /api/customers/me/notification-preferences`, `GET /api/customers/me/available-programs`
 - Notifications client transactionnelles (email MVP, push préparé mais non implémenté)
@@ -1919,6 +1920,539 @@ Retourne les rewards du customer authentifié, triées par `generated_at` décro
 **Erreurs :**
 - `401` : `Unauthorized`
 - `404` : `Customer not found for user` (ex: token merchant utilisé sur cet endpoint)
+
+### Module Avis Google
+
+Ce module permet de configurer un parcours customer lié à un merchant, basé uniquement sur deux signaux vérifiables côté backend :
+- le clic sortant vers la page Google du merchant
+- le retour explicite du customer dans l'app
+
+**Important :** le backend ne vérifie jamais qu'un avis Google a réellement été posté et ne vérifie jamais une note `5/5`.
+
+#### Règles produit
+
+- Un module n'est visible côté customer que s'il est complet.
+- Un module complet signifie : `is_enabled = true`, `google_review_url` valide, au moins une reward option active.
+- Un customer peut récupérer plusieurs modules s'il est lié à plusieurs merchants.
+- En V1, une seule session active est attendue par couple customer x merchant.
+- Une session ne peut produire qu'une seule reward.
+- Un QR de reward ne peut être redeem qu'une seule fois.
+
+#### Domaines Google autorisés
+
+- `google.com`
+- `www.google.com`
+- `maps.google.com`
+- `g.page`
+
+HTTPS est obligatoire.
+
+#### Statuts session
+
+- `READY_TO_LAUNCH`
+- `OUTBOUND_OPENED`
+- `RETURNED_TO_APP`
+- `REWARD_READY`
+- `REDEEMED`
+- `EXPIRED`
+
+#### Statuts reward
+
+- `ACTIVE`
+- `REDEEMED`
+- `EXPIRED`
+- `CANCELLED`
+
+#### GET /api/merchants/me/google-review-module
+
+```http
+GET /api/merchants/me/google-review-module
+Authorization: Bearer <token>
+```
+
+Retourne la configuration du merchant courant. Si elle n'existe pas encore, le backend crée une configuration par défaut persistée.
+
+**Accès :** `ROLE_MERCHANT`
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "uuid-module",
+  "merchant_id": "uuid-merchant",
+  "merchant_name": "Boulangerie Martin",
+  "is_enabled": false,
+  "display_name": "Avis Google",
+  "google_review_url": null,
+  "show_in_customer_dashboard": true,
+  "show_qr_code": true,
+  "reward_options": [],
+  "merchant_logo_url": null,
+  "is_configuration_complete": false,
+  "created_at": "2026-04-19T12:00:00+00:00",
+  "updated_at": "2026-04-19T12:00:00+00:00"
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+
+#### PUT /api/merchants/me/google-review-module
+
+```http
+PUT /api/merchants/me/google-review-module
+Authorization: Bearer <token>
+```
+
+**Body :**
+
+```json
+{
+  "is_enabled": true,
+  "display_name": "Avis Google",
+  "google_review_url": "https://g.page/r/demo/review",
+  "show_in_customer_dashboard": true,
+  "show_qr_code": true,
+  "reward_options": [
+    {
+      "label": "Cafe offert",
+      "description": null,
+      "active": true,
+      "order": 1
+    },
+    {
+      "label": "Cookie offert",
+      "description": null,
+      "active": true,
+      "order": 2
+    }
+  ]
+}
+```
+
+**Comportement :**
+- normalise et persiste la configuration
+- génère un `id` par reward option si absent
+- refuse l'activation sans URL Google valide
+- refuse l'activation sans reward option active
+- ignore silencieusement `google_place_id` et `google_place_name` s'ils sont encore envoyés par un ancien client
+
+**Erreurs métier stables :**
+- `400` : `google_review_payload_invalid`
+- `404` : `merchant_not_found`
+- `422` : `google_review_url_missing`
+- `422` : `google_review_url_invalid`
+- `422` : `google_review_rewards_missing`
+- `422` : `google_review_rewards_invalid`
+
+#### GET /api/merchants/me/google-review-rewards
+
+```http
+GET /api/merchants/me/google-review-rewards?status=ACTIVE&search=jean&page=1&itemsPerPage=15
+Authorization: Bearer <token>
+```
+
+Liste paginée des récompenses Avis Google du merchant connecté.
+
+**Accès :** `ROLE_MERCHANT`
+
+**Query params :**
+- `status` optionnel : `ACTIVE` | `REDEEMED` | `EXPIRED` | `CANCELLED`
+- `search` optionnel : recherche libre sur `customer_name` et `customer_email`
+- `page` optionnel : entier >= 1, défaut `1`
+- `itemsPerPage` optionnel : entier >= 1, défaut `15`, max `100`
+
+**Comportement :**
+- scope strict sur le merchant connecté
+- tri par défaut `created_at DESC`
+- si `status=ACTIVE`, seules les récompenses non récupérées sont retournées
+
+**Réponse 200 :**
+
+```json
+{
+  "items": [
+    {
+      "id": "3f18c7c0-7e4c-4f3f-80a2-6a8eb31f8f0f",
+      "merchant_id": "b12f8c4f-1d65-4d7a-b2df-7ac87eb0f83a",
+      "customer_id": 42,
+      "customer_name": "Jean Dupont",
+      "customer_email": "jean@exemple.fr",
+      "reward_label": "Cafe offert",
+      "reward_description": null,
+      "status": "ACTIVE",
+      "qr_token": "857f2f...",
+      "qr_payload": "coachat-google-review-reward://857f2f...",
+      "created_at": "2026-04-19T10:43:11+00:00",
+      "redeemed_at": null
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "itemsPerPage": 15
+}
+```
+
+**Erreurs métier stables :**
+- `404` : `merchant_not_found`
+- `422` : `google_review_reward_status_invalid`
+
+#### POST /api/merchants/me/google-review-rewards/{rewardId}/redeem
+
+```http
+POST /api/merchants/me/google-review-rewards/{rewardId}/redeem
+Authorization: Bearer <token>
+```
+
+Fallback de validation manuelle si le scan QR ne fonctionne pas.
+
+**Accès :** `ROLE_MERCHANT`
+
+**Comportement :**
+- vérifie que la récompense appartient au merchant connecté
+- utilise la même logique métier que le redeem par scan
+- autorise uniquement le statut `ACTIVE`
+- passe la reward à `REDEEMED`
+- passe la session liée à `REDEEMED`
+- journalise `REWARD_REDEEMED`
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "3f18c7c0-7e4c-4f3f-80a2-6a8eb31f8f0f",
+  "status": "REDEEMED",
+  "redeemed_at": "2026-04-19T11:02:10+00:00"
+}
+```
+
+**Erreurs métier stables :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_reward_not_found`
+- `409` : `google_review_reward_already_redeemed`
+- `409` : `google_review_reward_not_redeemable`
+
+#### GET /api/customer/me/google-review-modules
+
+```http
+GET /api/customer/me/google-review-modules
+Authorization: Bearer <token>
+```
+
+Retourne tous les modules actifs et complets pour les merchants liés au customer courant.
+
+**Accès :** `ROLE_CUSTOMER`
+
+**Réponse 200 :**
+
+```json
+[
+  {
+    "merchant_id": "uuid-merchant",
+    "merchant_name": "Boulangerie Martin",
+    "display_name": "Avis Google",
+    "merchant_logo_url": null,
+    "google_review_url": "https://g.page/r/demo/review",
+    "status": "ready_to_launch",
+    "detail_route": "/customer/google-review/uuid-merchant",
+    "active_session_id": null,
+    "active_reward_id": null,
+    "show_qr_code": true
+  }
+]
+```
+
+#### GET /api/customer/me/google-review-modules/{merchantId}
+
+```http
+GET /api/customer/me/google-review-modules/{merchantId}
+Authorization: Bearer <token>
+```
+
+Retourne la vue customer-facing du module pour un merchant donné, avec session et reward courantes si elles existent.
+
+**Réponse 200 :**
+
+```json
+{
+  "merchant_id": "uuid-merchant",
+  "merchant_name": "Boulangerie Martin",
+  "display_name": "Avis Google",
+  "merchant_logo_url": null,
+  "google_review_url": "https://g.page/r/demo/review",
+  "status": "ready_to_spin",
+  "active_session": {
+    "id": "uuid-session",
+    "status": "RETURNED_TO_APP"
+  },
+  "active_reward": null,
+  "show_qr_code": true
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_module_not_found`
+
+#### GET /api/customer/me/google-review-modules/{merchantId}/reward-options
+
+```http
+GET /api/customer/me/google-review-modules/{merchantId}/reward-options
+Authorization: Bearer <token>
+```
+
+Retourne la liste des récompenses disponibles pour le module Avis Google d'un merchant donné. Seules les `reward_options` actives sont exposées au customer.
+
+**Réponse 200 :**
+
+```json
+{
+  "merchant_id": "uuid-merchant",
+  "merchant_name": "Boulangerie Martin",
+  "merchant_logo_url": null,
+  "display_name": "Avis Google",
+  "google_review_url": "https://g.page/r/demo/review",
+  "show_qr_code": true,
+  "reward_options": [
+    {
+      "id": "uuid-option-1",
+      "label": "Cafe offert",
+      "description": null,
+      "active": true,
+      "order": 1
+    },
+    {
+      "id": "uuid-option-2",
+      "label": "Cookie offert",
+      "description": "Un cookie offert",
+      "active": true,
+      "order": 2
+    }
+  ]
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_module_not_found`
+
+#### POST /api/customer/me/google-review-modules/{merchantId}/launch
+
+```http
+POST /api/customer/me/google-review-modules/{merchantId}/launch
+Authorization: Bearer <token>
+```
+
+Crée ou réutilise une session pour le couple customer x merchant, incrémente `launch_count` et journalise `OUTBOUND_CLICKED`.
+
+**Réponse 200 :**
+
+```json
+{
+  "session_id": "uuid-session",
+  "status": "OUTBOUND_OPENED",
+  "redirect_url": "https://g.page/r/demo/review"
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_module_not_found`
+
+#### POST /api/customer/me/google-review-sessions/{sessionId}/return
+
+```http
+POST /api/customer/me/google-review-sessions/{sessionId}/return
+Authorization: Bearer <token>
+```
+
+Confirme le retour dans l'app, positionne la session en `RETURNED_TO_APP` et expose `can_spin`.
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "uuid-session",
+  "status": "RETURNED_TO_APP",
+  "launch_count": 1,
+  "launched_at": "2026-04-19T12:05:00+00:00",
+  "returned_at": "2026-04-19T12:06:00+00:00",
+  "spun_at": null,
+  "google_review_url": "https://g.page/r/demo/review",
+  "can_spin": true,
+  "reward": null
+}
+```
+
+**Erreurs :**
+- `404` : `google_review_session_not_found`
+- `409` : `google_review_session_invalid_state`
+
+#### GET /api/customer/me/google-review-sessions/{sessionId}
+
+```http
+GET /api/customer/me/google-review-sessions/{sessionId}
+Authorization: Bearer <token>
+```
+
+Retourne l'état courant de la session et la reward associée si présente.
+
+#### POST /api/customer/me/google-review-sessions/{sessionId}/spin
+
+```http
+POST /api/customer/me/google-review-sessions/{sessionId}/spin
+Authorization: Bearer <token>
+```
+
+Attribue une reward unique à la session. Le résultat est idempotent : si une reward existe déjà pour la session, elle est retournée telle quelle.
+
+**Comportement :**
+- verrou pessimiste sur la session en transaction
+- refuse le spin si la session n'est pas en `RETURNED_TO_APP`
+- refuse le spin si une autre reward `ACTIVE` existe déjà pour ce customer et ce merchant
+- sélection uniforme parmi les reward options actives
+- crée un QR token unitaire et un `qr_payload` de forme `coachat-google-review-reward://<token>`
+- journalise `WHEEL_SPUN` puis `REWARD_REVEALED`
+
+**Réponse 200 :**
+
+```json
+{
+  "session_id": "uuid-session",
+  "status": "REWARD_READY",
+  "google_review_url": "https://g.page/r/demo/review",
+  "reward": {
+    "id": "uuid-reward",
+    "reward_label": "Cafe offert",
+    "reward_description": null,
+    "status": "ACTIVE",
+    "qr_token": "abc123",
+    "qr_payload": "coachat-google-review-reward://abc123"
+  }
+}
+```
+
+**Erreurs :**
+- `404` : `google_review_session_not_found`
+- `409` : `google_review_session_invalid_state`
+- `409` : `google_review_reward_already_active`
+- `409` : `google_review_module_incomplete`
+- `422` : `google_review_rewards_missing`
+
+#### GET /api/customer/me/google-review-rewards/{rewardId}
+
+```http
+GET /api/customer/me/google-review-rewards/{rewardId}
+Authorization: Bearer <token>
+```
+
+Retourne la reward customer-facing et conserve `google_review_url` visible pour le frontend.
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "uuid-reward",
+  "reward_label": "Cafe offert",
+  "reward_description": null,
+  "status": "ACTIVE",
+  "qr_token": "abc123",
+  "qr_payload": "coachat-google-review-reward://abc123",
+  "google_review_url": "https://g.page/r/demo/review",
+  "redeemed_at": null
+}
+```
+
+**Erreurs :**
+- `404` : `google_review_reward_not_found`
+
+#### POST /api/google-review-rewards/{qrToken}/redeem
+
+```http
+POST /api/google-review-rewards/{qrToken}/redeem
+Authorization: Bearer <token>
+```
+
+Redeem merchant d'une reward QR mono-usage.
+
+**Accès :** `ROLE_MERCHANT`
+
+**Comportement :**
+- vérifie que la reward appartient au merchant connecté
+- partage la même logique métier que `POST /api/merchants/me/google-review-rewards/{rewardId}/redeem`
+- autorise uniquement le statut `ACTIVE`
+- passe la reward à `REDEEMED`
+- passe la session à `REDEEMED`
+- journalise `REWARD_REDEEMED`
+
+**Réponse 200 :**
+
+```json
+{
+  "id": "uuid-reward",
+  "status": "REDEEMED",
+  "reward_label": "Cafe offert",
+  "redeemed_at": "2026-04-19T12:10:00+00:00",
+  "session_id": "uuid-session"
+}
+```
+
+**Erreurs :**
+- `404` : `merchant_not_found`
+- `404` : `google_review_reward_not_found`
+- `409` : `google_review_reward_already_redeemed`
+- `409` : `google_review_reward_not_redeemable`
+
+#### POST /api/google-review-events
+
+```http
+POST /api/google-review-events
+Authorization: Bearer <token>
+```
+
+Endpoint optionnel pour journaliser des événements complémentaires depuis l'app customer.
+
+**Body :**
+
+```json
+{
+  "merchant_id": "uuid-merchant",
+  "session_id": "uuid-session",
+  "event_type": "MODULE_VIEWED",
+  "source": "customer_app",
+  "metadata": {
+    "screen": "google-review-detail"
+  }
+}
+```
+
+**Types d'événements acceptés :**
+- `MODULE_VIEWED`
+- `DETAIL_VIEWED`
+- `OUTBOUND_CLICKED`
+- `RETURN_CONFIRMED`
+- `WHEEL_SPUN`
+- `REWARD_REVEALED`
+- `QR_VIEWED`
+- `REWARD_REDEEMED`
+
+**Réponse 201 :**
+
+```json
+{
+  "id": "uuid-event",
+  "event_type": "MODULE_VIEWED",
+  "created_at": "2026-04-19T12:11:00+00:00"
+}
+```
+
+**Erreurs :**
+- `400` : `google_review_payload_invalid`
+- `404` : `customer_not_found`
+- `404` : `merchant_not_found`
+- `404` : `google_review_module_not_found`
+- `404` : `google_review_session_not_found`
+- `422` : `google_review_event_invalid`
 
 ### Update Customer
 ```
