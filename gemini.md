@@ -2386,6 +2386,7 @@ Authorization: Bearer <token>
 ```
 
 Retourne tous les modules actifs et complets pour les merchants liés au customer courant.
+Chaque item inclut `is_active` pour indiquer si le module Google Review est activé côté merchant.
 
 **Accès :** `ROLE_CUSTOMER`
 
@@ -2399,6 +2400,7 @@ Retourne tous les modules actifs et complets pour les merchants liés au custome
     "display_name": "Avis Google",
     "merchant_logo_url": null,
     "google_review_url": "https://g.page/r/demo/review",
+    "is_active": true,
     "status": "ready_to_launch",
     "detail_route": "/customer/google-review/uuid-merchant",
     "active_session_id": null,

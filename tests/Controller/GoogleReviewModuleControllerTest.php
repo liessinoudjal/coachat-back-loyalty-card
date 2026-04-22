@@ -258,6 +258,7 @@ final class GoogleReviewModuleControllerTest extends WebTestCase
 
         self::assertCount(1, $payload);
         self::assertSame($merchantA->getId()?->toRfc4122(), $payload[0]['merchant_id']);
+        self::assertTrue($payload[0]['is_active']);
         self::assertSame('ready_to_launch', $payload[0]['status']);
     }
 

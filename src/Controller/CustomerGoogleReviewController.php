@@ -237,6 +237,7 @@ class CustomerGoogleReviewController extends AbstractController
             'display_name' => $module->getDisplayName(),
             'merchant_logo_url' => $merchant?->getLogoUrl(),
             'google_review_url' => $module->getGoogleReviewUrl(),
+            'is_active' => $module->isEnabled(),
             'status' => $this->journeyService->deriveCustomerStatus($session, $reward),
             'detail_route' => '/customer/google-review/' . $merchant?->getId()?->toRfc4122(),
             'active_session_id' => $session?->getId()?->toRfc4122(),
