@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\Merchant;
 use App\Enum\LoyaltyProgramType;
 use App\Enum\NotificationType;
+use App\Repository\MerchantGoogleReviewModuleRepository;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
@@ -16,6 +17,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     public function __construct(
         private readonly MailerInterface $mailer,
         private readonly Environment $twig,
+        private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
+        private readonly GoogleReviewUrlValidator $googleReviewUrlValidator,
         private readonly string $fromEmail,
         private readonly string $fromName,
     ) {
@@ -64,6 +67,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
         $subject = sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -86,7 +90,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
-        ]);
+        ] + $googleReviewInviteContext);
 
         return [
             'subject' => $subject,
@@ -107,6 +111,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $targetValue = $context['target_value'] ?? null;
         $unitLabel = (string) ($context['unit_label'] ?? 'points');
         $subject = sprintf('Votre carte fidélité est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -132,7 +137,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'program_name' => $programName,
             'target_value' => $targetValue,
             'unit_label' => $unitLabel,
-        ]);
+        ] + $googleReviewInviteContext);
 
         return [
             'subject' => $subject,
@@ -152,6 +157,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
         $programName = (string) ($context['program_name'] ?? 'Carte fidélité');
         $subject = sprintf('Votre récompense est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -175,7 +181,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'dashboard_url' => $dashboardUrl,
             'reward_description' => $rewardDescription,
             'program_name' => $programName,
-        ]);
+        ] + $googleReviewInviteContext);
 
         return [
             'subject' => $subject,
@@ -197,6 +203,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $currentValue = $context['current_value'] ?? null;
         $targetValue = $context['target_value'] ?? null;
         $rewardReady = (bool) ($context['reward_ready'] ?? false);
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $subject = sprintf('Votre carte %s a été mise à jour chez %s', $unitLabel, $merchant->getCompanyName() ?? 'Coachat');
 
@@ -225,7 +232,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'target_value' => $targetValue,
             'reward_ready' => $rewardReady,
             'unit_label' => $unitLabel,
-        ]);
+        ] + $googleReviewInviteContext);
 
         return [
             'subject' => $subject,
@@ -243,6 +250,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
         $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $subject = sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat');
 
@@ -268,12 +276,48 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
             'reward_description' => $rewardDescription,
-        ]);
+        ] + $googleReviewInviteContext);
 
         return [
             'subject' => $subject,
             'text' => $text,
             'html' => $html,
+        ];
+    }
+
+    /**
+     * @return array{show_google_review_invite: bool, google_review_url: ?string, google_review_display_name: string, google_review_merchant_name: string}
+     */
+    private function buildGoogleReviewInviteContext(Merchant $merchant, array $context = []): array
+    {
+        $contextUrl = isset($context['google_review_url']) ? (string) $context['google_review_url'] : null;
+        $contextDisplayName = isset($context['google_review_display_name']) ? (string) $context['google_review_display_name'] : 'Avis Google';
+        $contextMerchantName = isset($context['google_review_merchant_name']) ? (string) $context['google_review_merchant_name'] : ($merchant->getCompanyName() ?? 'ce commerce');
+        $contextShowFlag = $context['show_google_review_invite'] ?? null;
+
+        if ($contextUrl !== null && trim($contextUrl) !== '') {
+            $contextUrl = trim($contextUrl);
+            $hasValidContextUrl = $this->googleReviewUrlValidator->isAllowedGoogleReviewUrl($contextUrl);
+            $showInvite = is_bool($contextShowFlag) ? $contextShowFlag && $hasValidContextUrl : $hasValidContextUrl;
+
+            return [
+                'show_google_review_invite' => $showInvite,
+                'google_review_url' => $showInvite ? $contextUrl : null,
+                'google_review_display_name' => $contextDisplayName,
+                'google_review_merchant_name' => $contextMerchantName,
+            ];
+        }
+
+        $module = $this->googleReviewModuleRepository->findOneByMerchant($merchant);
+        $url = $module?->getGoogleReviewUrl();
+        $hasValidUrl = $this->googleReviewUrlValidator->isAllowedGoogleReviewUrl($url);
+        $showInvite = $module?->isEnabled() === true && $hasValidUrl;
+
+        return [
+            'show_google_review_invite' => $showInvite,
+            'google_review_url' => $showInvite ? $url : null,
+            'google_review_display_name' => $module?->getDisplayName() ?? 'Avis Google',
+            'google_review_merchant_name' => $merchant->getCompanyName() ?? 'ce commerce',
         ];
     }
 }
