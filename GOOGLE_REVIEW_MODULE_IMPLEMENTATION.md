@@ -3,7 +3,7 @@
 ## Ce qui a ete implemente
 
 - Configuration merchant dediee via `MerchantGoogleReviewModule` avec validations de completion et whitelist stricte des URLs Google.
-- Parcours customer base sur deux signaux seulement: clic sortant vers Google puis retour confirme dans l'app.
+- Parcours customer centre sur la roue et la recompense; l'ouverture Google Review est desormais optionnelle (conservee temporairement en compatibilite via launch/return).
 - Session unique reutilisable par couple customer x merchant tant qu'aucune nouvelle session n'est necessaire.
 - Attribution idempotente d'une recompense unique par session avec selection uniforme parmi les reward options actives.
 - QR token mono-usage redeemable uniquement par le merchant proprietaire de la recompense.

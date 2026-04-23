@@ -2169,9 +2169,10 @@ Retourne les rewards du customer authentifié, triées par `generated_at` décro
 
 ### Module Avis Google
 
-Ce module permet de configurer un parcours customer lié à un merchant, basé uniquement sur deux signaux vérifiables côté backend :
-- le clic sortant vers la page Google du merchant
-- le retour explicite du customer dans l'app
+Ce module permet de configurer un parcours customer lié à un merchant.
+Le coeur du flow est désormais l'obtention d'une récompense via la roue, puis la proposition de laisser un avis Google qui reste optionnelle.
+
+**Compat V1/V2 :** le backend conserve temporairement les signaux historiques de session (`launch` puis `return`) pour compatibilité de transition.
 
 **Important :** le backend ne vérifie jamais qu'un avis Google a réellement été posté et ne vérifie jamais une note `5/5`.
 
@@ -2545,6 +2546,8 @@ Authorization: Bearer <token>
 
 Retourne l'état courant de la session et la reward associée si présente.
 
+**Déprécié :** oui (phase A). Endpoint conservé temporairement pour compatibilité, suppression prévue en phase B.
+
 #### POST /api/customer/me/google-review-sessions/{sessionId}/spin
 
 ```http
@@ -2595,6 +2598,8 @@ Authorization: Bearer <token>
 ```
 
 Retourne la reward customer-facing et conserve `google_review_url` visible pour le frontend.
+
+**Déprécié :** oui (phase A). Endpoint conservé temporairement pour compatibilité, suppression prévue en phase B.
 
 **Réponse 200 :**
 

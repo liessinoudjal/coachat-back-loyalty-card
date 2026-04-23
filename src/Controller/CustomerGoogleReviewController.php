@@ -12,6 +12,7 @@ use App\Exception\GoogleReviewException;
 use App\Repository\MerchantRepository;
 use App\Service\GoogleReviewJourneyService;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,6 +24,7 @@ class CustomerGoogleReviewController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly MerchantRepository $merchantRepository,
         private readonly GoogleReviewJourneyService $journeyService,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -157,6 +159,12 @@ class CustomerGoogleReviewController extends AbstractController
             return $customer;
         }
 
+        $this->logger->warning('Deprecated customer Google review session endpoint used.', [
+            'route' => 'customer_google_review_session_show',
+            'session_id' => $sessionId,
+            'customer_id' => $customer->getId(),
+        ]);
+
         try {
             $session = $this->journeyService->getCustomerSession($sessionId, $customer);
 
@@ -197,6 +205,12 @@ class CustomerGoogleReviewController extends AbstractController
         if (!$customer instanceof Customer) {
             return $customer;
         }
+
+        $this->logger->warning('Deprecated customer Google review reward endpoint used.', [
+            'route' => 'customer_google_review_reward_show',
+            'reward_id' => $rewardId,
+            'customer_id' => $customer->getId(),
+        ]);
 
         try {
             $reward = $this->journeyService->getCustomerReward($rewardId, $customer);
