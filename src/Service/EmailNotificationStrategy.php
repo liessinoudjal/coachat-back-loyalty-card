@@ -7,6 +7,7 @@ use App\Entity\Merchant;
 use App\Enum\LoyaltyProgramType;
 use App\Enum\NotificationType;
 use App\Repository\MerchantGoogleReviewModuleRepository;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
@@ -19,6 +20,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         private readonly Environment $twig,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly GoogleReviewUrlValidator $googleReviewUrlValidator,
+        private readonly LoggerInterface $logger,
         private readonly string $fromEmail,
         private readonly string $fromName,
     ) {
@@ -26,10 +28,30 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
 
     public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): void
     {
+        $merchantId = $merchant->getId()?->toRfc4122();
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail();
+        $customerId = $customer->getId() !== null ? (string) $customer->getId() : null;
         $recipient = $customer->getEmail() ?? $customer->getUser()?->getEmail();
+
         if ($recipient === null || trim($recipient) === '') {
+            $this->logger->warning('Customer email notification skipped: missing recipient email.', [
+                'notification_type' => $type->value,
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+                'customer_id' => $customerId,
+            ]);
+
             return;
         }
+
+        $this->logger->info('Customer email notification send started.', [
+            'notification_type' => $type->value,
+            'merchant_id' => $merchantId,
+            'merchant_email' => $merchantEmail,
+            'customer_id' => $customerId,
+            'customer_email' => $recipient,
+            'recipient_email' => $recipient,
+        ]);
 
         $emailData = $this->buildEmailData($merchant, $customer, $type, $context);
 
@@ -40,7 +62,32 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             ->text($emailData['text'])
             ->html($emailData['html']);
 
-        $this->mailer->send($email);
+        try {
+            $this->mailer->send($email);
+
+            $this->logger->info('Customer email notification sent.', [
+                'notification_type' => $type->value,
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+                'customer_id' => $customerId,
+                'customer_email' => $recipient,
+                'recipient_email' => $recipient,
+                'subject' => $emailData['subject'],
+            ]);
+        } catch (\Throwable $exception) {
+            $this->logger->error('Customer email notification failed.', [
+                'notification_type' => $type->value,
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+                'customer_id' => $customerId,
+                'customer_email' => $recipient,
+                'recipient_email' => $recipient,
+                'subject' => $emailData['subject'],
+                'exception' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
     }
 
     /**
@@ -290,6 +337,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
      */
     private function buildGoogleReviewInviteContext(Merchant $merchant, array $context = []): array
     {
+        $merchantId = $merchant->getId()?->toRfc4122();
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail();
         $contextUrl = isset($context['google_review_url']) ? (string) $context['google_review_url'] : null;
         $contextDisplayName = isset($context['google_review_display_name']) ? (string) $context['google_review_display_name'] : 'Avis Google';
         $contextMerchantName = isset($context['google_review_merchant_name']) ? (string) $context['google_review_merchant_name'] : ($merchant->getCompanyName() ?? 'ce commerce');
@@ -299,6 +348,17 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             $contextUrl = trim($contextUrl);
             $hasValidContextUrl = $this->googleReviewUrlValidator->isAllowedGoogleReviewUrl($contextUrl);
             $showInvite = is_bool($contextShowFlag) ? $contextShowFlag && $hasValidContextUrl : $hasValidContextUrl;
+
+            $this->logger->info('Resolved Google review invite context from notification payload.', [
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+                'source' => 'context',
+                'context_show_flag' => $contextShowFlag,
+                'url_present' => true,
+                'url_valid' => $hasValidContextUrl,
+                'show_google_review_invite' => $showInvite,
+                'google_review_url' => $showInvite ? $contextUrl : null,
+            ]);
 
             return [
                 'show_google_review_invite' => $showInvite,
@@ -312,6 +372,18 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $url = $module?->getGoogleReviewUrl();
         $hasValidUrl = $this->googleReviewUrlValidator->isAllowedGoogleReviewUrl($url);
         $showInvite = $module?->isEnabled() === true && $hasValidUrl;
+
+        $this->logger->info('Resolved Google review invite context from merchant module.', [
+            'merchant_id' => $merchantId,
+            'merchant_email' => $merchantEmail,
+            'source' => 'merchant_module',
+            'module_found' => $module !== null,
+            'module_enabled' => $module?->isEnabled(),
+            'url_present' => $url !== null && trim((string) $url) !== '',
+            'url_valid' => $hasValidUrl,
+            'show_google_review_invite' => $showInvite,
+            'google_review_url' => $showInvite ? $url : null,
+        ]);
 
         return [
             'show_google_review_invite' => $showInvite,

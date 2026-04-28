@@ -1,5 +1,7 @@
 monolog:
     channels:
+        - notification_customer
+        - notification_merchant
         - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
 
 when@dev:
@@ -10,6 +12,16 @@ when@dev:
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
                 channels: ["!event"]
+            notification_customer:
+                type: stream
+                path: "%kernel.logs_dir%/notification_customer.log"
+                level: debug
+                channels: [notification_customer]
+            notification_merchant:
+                type: stream
+                path: "%kernel.logs_dir%/notification_merchant.log"
+                level: debug
+                channels: [notification_merchant]
             console:
                 type: console
                 process_psr_3_messages: false
@@ -28,6 +40,16 @@ when@test:
                 type: stream
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
+            notification_customer:
+                type: stream
+                path: "%kernel.logs_dir%/notification_customer.log"
+                level: debug
+                channels: [notification_customer]
+            notification_merchant:
+                type: stream
+                path: "%kernel.logs_dir%/notification_merchant.log"
+                level: debug
+                channels: [notification_merchant]
 
 when@prod:
     monolog:
@@ -52,4 +74,16 @@ when@prod:
                 type: stream
                 channels: [deprecation]
                 path: php://stderr
+                formatter: monolog.formatter.json
+            notification_customer:
+                type: stream
+                path: "%kernel.logs_dir%/notification_customer.log"
+                level: info
+                channels: [notification_customer]
+                formatter: monolog.formatter.json
+            notification_merchant:
+                type: stream
+                path: "%kernel.logs_dir%/notification_merchant.log"
+                level: info
+                channels: [notification_merchant]
                 formatter: monolog.formatter.json

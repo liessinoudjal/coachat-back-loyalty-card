@@ -16,7 +16,8 @@ class SignupAlertMailer
     public function __construct(
         private readonly MailerInterface $mailer,
         private readonly Environment $twig,
-        private readonly LoggerInterface $logger,
+        private readonly LoggerInterface $customerLogger,
+        private readonly LoggerInterface $merchantLogger,
         private readonly string $alertRecipient,
         private readonly string $fromEmail,
         private readonly string $fromName,
@@ -67,6 +68,7 @@ class SignupAlertMailer
                 'merchant_id' => $merchantId,
                 'merchant_email' => $merchantEmail,
             ],
+            logger: $this->merchantLogger,
         );
     }
 
@@ -74,6 +76,7 @@ class SignupAlertMailer
     {
         $merchantId = $merchant->getId()?->toRfc4122() ?? 'n/a';
         $merchantName = $merchant->getCompanyName() ?? 'n/a';
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail() ?? 'n/a';
         $customerEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail() ?? 'n/a';
         $customerName = $customer->getName() ?? $customer->getUser()?->getName() ?? 'n/a';
         $customerId = $customer->getId() !== null ? (string) $customer->getId() : 'n/a';
@@ -115,11 +118,13 @@ class SignupAlertMailer
                 'customer_id' => $customerId,
                 'customer_email' => $customerEmail,
                 'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
             ],
+            logger: $this->customerLogger,
         );
     }
 
-    private function sendMessage(string $subject, string $textBody, string $htmlBody, array $context): void
+    private function sendMessage(string $subject, string $textBody, string $htmlBody, array $context, LoggerInterface $logger): void
     {
         $email = (new Email())
             ->from(new Address($this->fromEmail, $this->fromName))
@@ -128,11 +133,23 @@ class SignupAlertMailer
             ->text($textBody)
             ->html($htmlBody);
 
+        $logger->info('Signup alert email send started.', $context + [
+            'alert_recipient' => $this->alertRecipient,
+            'subject' => $subject,
+        ]);
+
         try {
             $this->mailer->send($email);
+
+            $logger->info('Signup alert email sent.', $context + [
+                'alert_recipient' => $this->alertRecipient,
+                'subject' => $subject,
+            ]);
         } catch (TransportExceptionInterface|\Throwable $exception) {
-            $this->logger->error('Failed to send signup alert email.', $context + [
+            $logger->error('Failed to send signup alert email.', $context + [
                 'exception' => $exception->getMessage(),
+                'alert_recipient' => $this->alertRecipient,
+                'subject' => $subject,
             ]);
         }
     }

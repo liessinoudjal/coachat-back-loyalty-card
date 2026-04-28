@@ -60,12 +60,15 @@ services:
 
     App\Service\SignupAlertMailer:
         arguments:
+            $customerLogger: '@monolog.logger.notification_customer'
+            $merchantLogger: '@monolog.logger.notification_merchant'
             $alertRecipient: '%env(SIGNUP_ALERT_EMAIL)%'
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
 
     App\Service\EmailNotificationStrategy:
         arguments:
+            $logger: '@monolog.logger.notification_customer'
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
 
