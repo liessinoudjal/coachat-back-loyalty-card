@@ -120,9 +120,13 @@ class AuthController extends AbstractController
         }
     }
 
-    #[Route('/api/auth/merchant/google/login', name: 'auth_merchant_google_login', methods: ['GET'])]
+    #[Route('/api/auth/merchant/google/login', name: 'auth_merchant_google_login', methods: ['GET', 'OPTIONS'])]
     public function googleMerchantLoginAuth(Request $request): JsonResponse
     {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
         $redirectUri = $request->query->get('redirect_uri');
         if (!$redirectUri) {
             return new JsonResponse(['error' => 'redirect_uri required'], 400);
@@ -131,7 +135,7 @@ class AuthController extends AbstractController
         return $this->buildGoogleAuthorizationResponse($redirectUri);
     }
 
-    #[Route('/api/auth/merchant/google/register', name: 'auth_merchant_google_register', methods: ['GET'])]
+    #[Route('/api/auth/merchant/google/register', name: 'auth_merchant_google_register', methods: ['GET', 'OPTIONS'])]
     public function googleMerchantRegisterAuth(Request $request): JsonResponse
     {
         $redirectUri = $request->query->get('redirect_uri');
@@ -163,15 +167,16 @@ class AuthController extends AbstractController
             $user = $superAdminUser ?? $this->upsertGoogleUser($googleUser);
             $this->syncGoogleIdentity($user, $googleUser);
             $isSuperAdmin = $superAdminUser !== null || $this->isSuperAdminUser($user);
+            $equipierMerchant = $this->resolveEquipierMerchant($user);
 
-            if ($this->isCustomerOnlyUser($user) && !$isSuperAdmin) {
+            if ($this->isCustomerOnlyUser($user) && !$isSuperAdmin && $equipierMerchant === null) {
                 return new JsonResponse([
                     'error' => 'account_already_customer',
                     'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
                 ], 409);
             }
 
-            if ($user->getMerchant() === null && !$isSuperAdmin) {
+            if ($user->getMerchant() === null && !$isSuperAdmin && $equipierMerchant === null) {
                 return new JsonResponse([
                     'error' => 'merchant_not_found_for_login',
                     'message' => 'No merchant account is linked to this Google account. Please register first.',
@@ -361,12 +366,15 @@ class AuthController extends AbstractController
                     'id' => $user->getId(),
                     'email' => $user->getEmail(),
                     'name' => $user->getName(),
+                    'roles' => $user->getRoles(),
                 ],
                 'customer' => [
                     'id' => $customer->getId(),
                     'email' => $customer->getEmail(),
                     'name' => $customer->getName(),
                     'merchant_ref' => $merchant->getId()?->toRfc4122(),
+                    'is_equipier' => $customer->getStaffMerchant() !== null,
+                    'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -413,11 +421,14 @@ class AuthController extends AbstractController
                     'id' => $user->getId(),
                     'email' => $user->getEmail(),
                     'name' => $user->getName(),
+                    'roles' => $user->getRoles(),
                 ],
                 'customer' => [
                     'id' => $customer->getId(),
                     'email' => $customer->getEmail(),
                     'name' => $customer->getName(),
+                    'is_equipier' => $customer->getStaffMerchant() !== null,
+                    'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -537,6 +548,8 @@ class AuthController extends AbstractController
     {
         $jwt = $this->jwtManager->create($user);
         $refreshToken = $this->refreshTokenService->createRefreshToken($user);
+        $equipierMerchant = $this->resolveEquipierMerchant($user);
+        $merchant = $user->getMerchant() ?? $equipierMerchant;
 
         return new JsonResponse([
             'token' => $jwt,
@@ -545,7 +558,14 @@ class AuthController extends AbstractController
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
+                'roles' => $user->getRoles(),
             ],
+            'merchant_context' => $merchant ? [
+                'id' => $merchant->getId()?->toRfc4122(),
+                'company_name' => $merchant->getCompanyName(),
+                'is_owner' => $user->getMerchant() === $merchant,
+                'is_equipier' => $equipierMerchant === $merchant,
+            ] : null,
         ]);
     }
 
@@ -566,6 +586,7 @@ class AuthController extends AbstractController
             'redirect_uri' => $redirectUri,
             'scope' => ['openid', 'email', 'profile'],
             'state' => $state,
+            'prompt' => 'select_account', # Force account selection on each login
         ]);
 
         return [
@@ -621,6 +642,15 @@ class AuthController extends AbstractController
     private function isCustomerOnlyUser(User $user): bool
     {
         return $user->getCustomer() !== null && $user->getMerchant() === null;
+    }
+
+    private function resolveEquipierMerchant(User $user): ?Merchant
+    {
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 
     private function isSuperAdminUser(User $user): bool
@@ -690,6 +720,9 @@ class AuthController extends AbstractController
         }
 
         $merchant = $user->getMerchant();
+        if ($merchant === null && in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            $merchant = $user->getCustomer()?->getStaffMerchant();
+        }
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -710,6 +743,8 @@ class AuthController extends AbstractController
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
+                'roles' => $user->getRoles(),
+                'is_equipier' => in_array('ROLE_EQUIPIER', $user->getRoles(), true),
             ]
         ]);
     }
@@ -756,6 +791,7 @@ class AuthController extends AbstractController
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
+                'roles' => $user->getRoles(),
             ]
         ]);
     }

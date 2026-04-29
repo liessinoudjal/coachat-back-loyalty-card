@@ -57,7 +57,7 @@ class MerchantController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -95,7 +95,7 @@ class MerchantController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -115,6 +115,25 @@ class MerchantController extends AbstractController
                 'programs' => $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
             ],
         ]);
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 
     #[Route('/api/merchants', name: 'create_merchant', methods: ['POST'])]

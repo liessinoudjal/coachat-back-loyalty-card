@@ -71,7 +71,8 @@ class LoyaltyCardController extends AbstractController
         }
 
         $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantId);
-        if (!$merchant || $merchant->getUser() !== $user) {
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$merchant || !$actorMerchant || $merchant !== $actorMerchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
 
@@ -95,7 +96,11 @@ class LoyaltyCardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -138,7 +143,8 @@ class LoyaltyCardController extends AbstractController
         }
 
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
-        if (!$card || $card->getMerchant()?->getUser() !== $user) {
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$card || !$actorMerchant || $card->getMerchant() !== $actorMerchant) {
             return new JsonResponse(['error' => 'Card not found'], 404);
         }
 
@@ -151,6 +157,10 @@ class LoyaltyCardController extends AbstractController
         $user = $this->getUser();
         if (!$user) {
             return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
         }
 
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
@@ -189,6 +199,10 @@ class LoyaltyCardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
         if (!$card || $card->getMerchant()->getUser() !== $user) {
             return new JsonResponse(['error' => 'Card not found'], 404);
@@ -208,6 +222,10 @@ class LoyaltyCardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
         $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($id);
         if (!$card || $card->getMerchant()->getUser() !== $user) {
             return new JsonResponse(['error' => 'Card not found'], 404);
@@ -218,5 +236,29 @@ class LoyaltyCardController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse(null, 204);
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
+    }
+
+    private function isMerchantOwner(object $user): bool
+    {
+        return method_exists($user, 'getMerchant') && $user->getMerchant() instanceof Merchant;
     }
 }

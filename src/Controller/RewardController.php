@@ -47,7 +47,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -111,7 +111,11 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -147,7 +151,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -177,7 +181,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -214,7 +218,11 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        if (!$this->isMerchantOwner($user)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -288,5 +296,29 @@ class RewardController extends AbstractController
         }
 
         return $payload;
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
+    }
+
+    private function isMerchantOwner(object $user): bool
+    {
+        return method_exists($user, 'getMerchant') && $user->getMerchant() instanceof Merchant;
     }
 }

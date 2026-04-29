@@ -28,6 +28,13 @@ class Customer
     #[ORM\JoinColumn(nullable: true)]
     private ?Merchant $merchant = null;
 
+    #[ORM\ManyToOne(inversedBy: 'staffCustomers')]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?Merchant $staffMerchant = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $staffAssignedAt = null;
+
     #[ORM\OneToOne(inversedBy: 'customer')]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?User $user = null;
@@ -107,6 +114,35 @@ class Customer
         $this->merchant = $merchant;
 
         return $this;
+    }
+
+    public function getStaffMerchant(): ?Merchant
+    {
+        return $this->staffMerchant;
+    }
+
+    public function setStaffMerchant(?Merchant $staffMerchant): static
+    {
+        $this->staffMerchant = $staffMerchant;
+
+        return $this;
+    }
+
+    public function getStaffAssignedAt(): ?\DateTimeImmutable
+    {
+        return $this->staffAssignedAt;
+    }
+
+    public function setStaffAssignedAt(?\DateTimeImmutable $staffAssignedAt): static
+    {
+        $this->staffAssignedAt = $staffAssignedAt;
+
+        return $this;
+    }
+
+    public function isStaffForMerchant(Merchant $merchant): bool
+    {
+        return $this->staffMerchant === $merchant;
     }
 
     public function getUser(): ?User

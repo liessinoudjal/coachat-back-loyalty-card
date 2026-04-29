@@ -85,6 +85,9 @@ class CustomerController extends AbstractController
                 'name' => $customer->getName(),
                 'email' => $customer->getEmail(),
                 'phone' => $customer->getPhone(),
+                'is_equipier' => $customer->getStaffMerchant() !== null,
+                'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
+                'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
             ],
             'merchants' => array_values($merchants),
         ]);
@@ -398,12 +401,7 @@ class CustomerController extends AbstractController
         // Force merchant from JWT, ignore query parameter for security
         $customers = $this->entityManager->getRepository(Customer::class)->findByMerchant($merchant);
 
-        return new JsonResponse(array_map(fn(Customer $c) => [
-            'id' => $c->getId(),
-            'name' => $c->getName(),
-            'email' => $c->getEmail(),
-            'phone' => $c->getPhone(),
-        ], $customers));
+        return new JsonResponse(array_map(fn(Customer $c) => $this->formatMerchantCustomer($c), $customers));
     }
 
     #[Route('/api/customers/{id}', name: 'get_customer', methods: ['GET'])]
@@ -427,10 +425,7 @@ class CustomerController extends AbstractController
         }
 
         return new JsonResponse([
-            'id' => $customer->getId(),
-            'name' => $customer->getName(),
-            'email' => $customer->getEmail(),
-            'phone' => $customer->getPhone(),
+            ...$this->formatMerchantCustomer($customer),
         ]);
     }
 
@@ -464,10 +459,7 @@ class CustomerController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse([
-            'id' => $customer->getId(),
-            'name' => $customer->getName(),
-            'email' => $customer->getEmail(),
-            'phone' => $customer->getPhone(),
+            ...$this->formatMerchantCustomer($customer),
         ]);
     }
 
@@ -636,5 +628,19 @@ class CustomerController extends AbstractController
         }
 
         return $customer->getMerchants()->contains($merchant);
+    }
+
+    private function formatMerchantCustomer(Customer $customer): array
+    {
+        return [
+            'id' => $customer->getId(),
+            'name' => $customer->getName(),
+            'email' => $customer->getEmail(),
+            'phone' => $customer->getPhone(),
+            'is_equipier' => $customer->getStaffMerchant() !== null,
+            'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
+            'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
+            'roles' => $customer->getUser()?->getRoles() ?? ['ROLE_CUSTOMER'],
+        ];
     }
 }

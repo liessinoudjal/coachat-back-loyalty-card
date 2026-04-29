@@ -80,6 +80,9 @@ class Merchant
     #[ORM\OneToMany(targetEntity: Reward::class, mappedBy: 'merchant', orphanRemoval: true)]
     private Collection $rewards;
 
+    #[ORM\OneToMany(targetEntity: Customer::class, mappedBy: 'staffMerchant')]
+    private Collection $staffCustomers;
+
     #[ORM\ManyToOne(targetEntity: Plan::class)]
     #[ORM\JoinColumn(nullable: true, referencedColumnName: 'id', columnDefinition: 'VARCHAR(36) DEFAULT NULL')]
     private ?Plan $plan = null;
@@ -91,6 +94,7 @@ class Merchant
         $this->loyaltyCards = new ArrayCollection();
         $this->transactions = new ArrayCollection();
         $this->rewards = new ArrayCollection();
+        $this->staffCustomers = new ArrayCollection();
     }
 
     public function getId(): ?Uuid
@@ -358,6 +362,35 @@ class Merchant
         if (!$this->loyaltyCards->contains($loyaltyCard)) {
             $this->loyaltyCards->add($loyaltyCard);
             $loyaltyCard->setMerchant($this);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Customer>
+     */
+    public function getStaffCustomers(): Collection
+    {
+        return $this->staffCustomers;
+    }
+
+    public function addStaffCustomer(Customer $customer): static
+    {
+        if (!$this->staffCustomers->contains($customer)) {
+            $this->staffCustomers->add($customer);
+            $customer->setStaffMerchant($this);
+        }
+
+        return $this;
+    }
+
+    public function removeStaffCustomer(Customer $customer): static
+    {
+        if ($this->staffCustomers->removeElement($customer)) {
+            if ($customer->getStaffMerchant() === $this) {
+                $customer->setStaffMerchant(null);
+            }
         }
 
         return $this;

@@ -61,6 +61,21 @@ class CustomerRepository extends ServiceEntityRepository
             ->getOneOrNullResult()
         ;
     }
+
+    /**
+     * @return Customer[]
+     */
+    public function findStaffByMerchant(Merchant $merchant): array
+    {
+        return $this->createQueryBuilder('c')
+            ->leftJoin('c.staffMerchant', 'm')
+            ->andWhere('m.id = :merchantId')
+            ->setParameter('merchantId', $merchant->getId(), 'uuid')
+            ->orderBy('c.name', 'ASC')
+            ->getQuery()
+            ->getResult()
+        ;
+    }
     //    /**
     //     * @return Customer[] Returns an array of Customer objects
     //     */

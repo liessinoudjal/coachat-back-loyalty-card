@@ -44,7 +44,8 @@ class TransactionController extends AbstractController
         }
 
         $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantId);
-        if (!$merchant || $merchant->getUser() !== $user) {
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$merchant || !$actorMerchant || $merchant !== $actorMerchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
 
@@ -74,7 +75,7 @@ class TransactionController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
@@ -135,5 +136,25 @@ class TransactionController extends AbstractController
             'points_redeemed' => $transaction->getPointsRedeemed(),
             'created_at' => $transaction->getCreatedAt()->format('Y-m-d H:i:s'),
         ], 201);
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 }
