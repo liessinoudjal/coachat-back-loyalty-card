@@ -34,7 +34,8 @@ class LoyaltyProgramController extends AbstractController
         }
 
         $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantId);
-        if (!$merchant || $merchant->getUser() !== $user) {
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$merchant || !$actorMerchant || $merchant !== $actorMerchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
 
@@ -182,5 +183,24 @@ class LoyaltyProgramController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse(['success' => true]);
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 }

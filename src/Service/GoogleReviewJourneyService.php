@@ -258,7 +258,7 @@ final class GoogleReviewJourneyService
 
     public function redeemReward(string $rawQrToken, User $actor): GoogleReviewReward
     {
-        $merchant = $actor->getMerchant();
+        $merchant = $this->resolveActorMerchant($actor);
         if (!$merchant instanceof Merchant) {
             throw new GoogleReviewException('merchant_not_found', 404);
         }
@@ -274,7 +274,7 @@ final class GoogleReviewJourneyService
 
     public function redeemRewardById(string $rewardId, User $actor): GoogleReviewReward
     {
-        $merchant = $actor->getMerchant();
+        $merchant = $this->resolveActorMerchant($actor);
         if (!$merchant instanceof Merchant) {
             throw new GoogleReviewException('merchant_not_found', 404);
         }
@@ -369,6 +369,20 @@ final class GoogleReviewJourneyService
         }
 
         return $trimmed;
+    }
+
+    private function resolveActorMerchant(User $actor): ?Merchant
+    {
+        $merchant = $actor->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $actor->getRoles(), true)) {
+            return null;
+        }
+
+        return $actor->getCustomer()?->getStaffMerchant();
     }
 
     private function isReusableSession(GoogleReviewSession $session): bool

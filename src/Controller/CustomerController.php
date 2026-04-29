@@ -393,7 +393,7 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
+        $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found for user'], 404);
         }
@@ -642,5 +642,24 @@ class CustomerController extends AbstractController
             'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
             'roles' => $customer->getUser()?->getRoles() ?? ['ROLE_CUSTOMER'],
         ];
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 }

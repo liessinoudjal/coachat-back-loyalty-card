@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Customer;
 use App\Entity\Merchant;
+use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -13,6 +14,7 @@ class MerchantStaffController extends AbstractController
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly NotificationService $notificationService,
     ) {
     }
 
@@ -74,6 +76,7 @@ class MerchantStaffController extends AbstractController
         $customerUser->setRoles(array_values(array_unique($roles)));
 
         $this->entityManager->flush();
+        $this->notificationService->notifyEquipierAssigned($customer, $merchant);
 
         return new JsonResponse($this->formatStaffCustomer($customer));
     }
@@ -107,6 +110,7 @@ class MerchantStaffController extends AbstractController
         }
 
         $this->entityManager->flush();
+        $this->notificationService->notifyEquipierRemoved($customer, $merchant);
 
         return new JsonResponse(['success' => true]);
     }

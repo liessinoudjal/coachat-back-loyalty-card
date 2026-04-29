@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\GoogleReviewReward;
 use App\Entity\Merchant;
+use App\Entity\User;
 use App\Enum\GoogleReviewRewardStatus;
 use App\Exception\GoogleReviewException;
 use App\Repository\GoogleReviewRewardRepository;
@@ -26,9 +27,16 @@ class GoogleReviewRewardRedemptionController extends AbstractController
     #[Route('/api/merchants/me/google-review-rewards', name: 'merchant_google_review_rewards_list', methods: ['GET'])]
     public function list(Request $request): JsonResponse
     {
-        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
 
-        $merchant = $this->getUser()?->getMerchant();
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true) && !in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $merchant = $this->resolveActorMerchant($user);
         if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
@@ -61,10 +69,17 @@ class GoogleReviewRewardRedemptionController extends AbstractController
     #[Route('/api/merchants/me/google-review-rewards/{rewardId}/redeem', name: 'merchant_google_review_reward_redeem', methods: ['POST'])]
     public function manualRedeem(string $rewardId): JsonResponse
     {
-        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true) && !in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
 
         try {
-            $reward = $this->journeyService->redeemRewardById($rewardId, $this->getUser());
+            $reward = $this->journeyService->redeemRewardById($rewardId, $user);
             $this->entityManager->flush();
 
             return new JsonResponse([
@@ -80,10 +95,17 @@ class GoogleReviewRewardRedemptionController extends AbstractController
     #[Route('/api/google-review-rewards/{qrToken}/redeem', name: 'google_review_reward_redeem', methods: ['POST'])]
     public function redeem(string $qrToken): JsonResponse
     {
-        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true) && !in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
 
         try {
-            $reward = $this->journeyService->redeemReward($qrToken, $this->getUser());
+            $reward = $this->journeyService->redeemReward($qrToken, $user);
             $this->entityManager->flush();
 
             return new JsonResponse([
@@ -114,5 +136,19 @@ class GoogleReviewRewardRedemptionController extends AbstractController
             'created_at' => $reward->getCreatedAt()?->format(DATE_ATOM),
             'redeemed_at' => $reward->getRedeemedAt()?->format(DATE_ATOM),
         ];
+    }
+
+    private function resolveActorMerchant(User $user): ?Merchant
+    {
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 }

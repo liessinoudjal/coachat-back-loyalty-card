@@ -97,12 +97,97 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     {
         return match ($type) {
             NotificationType::CUSTOMER_SIGNUP => $this->buildCustomerSignupEmailData($merchant, $customer, $context),
+            NotificationType::EQUIPIER_ASSIGNED => $this->buildEquipierAssignedEmailData($merchant, $customer, $context),
+            NotificationType::EQUIPIER_REMOVED => $this->buildEquipierRemovedEmailData($merchant, $customer, $context),
             NotificationType::CARD_CREATED => $this->buildCardCreatedEmailData($merchant, $customer, $context),
             NotificationType::CARD_COMPLETED => $this->buildCardCompletedEmailData($merchant, $customer, $context),
             NotificationType::POINTS_ADDED => $this->buildPointsAddedEmailData($merchant, $customer, $context),
             NotificationType::REWARD_CLAIMED => $this->buildRewardClaimedEmailData($merchant, $customer, $context),
             default => throw new \InvalidArgumentException(sprintf('Unsupported email notification type "%s".', $type->value)),
         };
+    }
+
+    /**
+     * @param array{dashboard_url?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildEquipierAssignedEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $subject = sprintf('Votre espace équipier est actif chez %s', $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Un espace équipier vous a été attribué chez %s.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'Depuis votre dashboard client, ouvrez le menu puis cliquez sur "Changer d\'espace" pour accéder à votre espace équipier.',
+            'Vous pouvez basculer à tout moment entre votre profil client et votre profil équipier depuis ce même menu.',
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+        ]);
+
+        $html = $this->twig->render('emails/equipier_assigned.html.twig', [
+            'email_title' => 'Espace équipier activé',
+            'email_eyebrow' => 'Nouveau rôle',
+            'email_accent' => 'ÉQUIPIER',
+            'summary' => sprintf('Votre accès équipier est maintenant actif chez %s.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $customer->getName() ?? 'Utilisateur',
+            'primary_label' => 'Compte',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'show_google_review_invite' => false,
+            'google_review_url' => null,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildEquipierRemovedEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $subject = sprintf('Votre accès équipier a été désactivé chez %s', $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Votre accès à l\'espace équipier chez %s a été désactivé.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'Votre espace client reste disponible normalement.',
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+        ]);
+
+        $html = $this->twig->render('emails/equipier_removed.html.twig', [
+            'email_title' => 'Espace équipier désactivé',
+            'email_eyebrow' => 'Mise à jour du compte',
+            'email_accent' => 'ÉQUIPIER',
+            'summary' => sprintf('Votre accès équipier chez %s a été retiré.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $customer->getName() ?? 'Utilisateur',
+            'primary_label' => 'Compte',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'show_google_review_invite' => false,
+            'google_review_url' => null,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
     }
 
     /**

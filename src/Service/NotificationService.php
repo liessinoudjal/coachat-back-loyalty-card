@@ -73,7 +73,7 @@ class NotificationService
             NotificationType::REWARD_CLAIMED,
             [
                 'reward_id' => (string) $reward->getId(),
-                'reward_description' => $reward->getRewardDescription() ?? 'Votre recompense',
+                'reward_description' => $reward->getRewardDescription() ?? 'Votre récompense',
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
             ],
         );
@@ -85,6 +85,30 @@ class NotificationService
             $merchant,
             $customer,
             NotificationType::CUSTOMER_SIGNUP,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+            ],
+        );
+    }
+
+    public function notifyEquipierAssigned(Customer $customer, Merchant $merchant): void
+    {
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::EQUIPIER_ASSIGNED,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+            ],
+        );
+    }
+
+    public function notifyEquipierRemoved(Customer $customer, Merchant $merchant): void
+    {
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::EQUIPIER_REMOVED,
             [
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
             ],
@@ -109,7 +133,7 @@ class NotificationService
             NotificationType::CARD_CREATED,
             [
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
-                'program_name' => $program?->getName() ?? 'Carte fidelite',
+                'program_name' => $program?->getName() ?? 'Carte fidélité',
                 'target_value' => $card->getTargetValue(),
                 'unit_label' => $unitLabel,
             ],
@@ -134,17 +158,19 @@ class NotificationService
             NotificationType::CARD_COMPLETED,
             [
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
-                'reward_description' => $reward->getRewardDescription() ?? 'Votre recompense',
-                'program_name' => $program?->getName() ?? 'Carte fidelite',
+                'reward_description' => $reward->getRewardDescription() ?? 'Votre récompense',
+                'program_name' => $program?->getName() ?? 'Carte fidélité',
             ],
         );
     }
 
     public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): void
     {
-        $preference = $this->preferenceRepository->findOneByCustomerAndMerchant($customer, $merchant);
-        if ($preference instanceof CustomerMerchantNotificationPreference && !$preference->isEnabled()) {
-            return;
+        if (!$this->isMandatoryNotificationType($type)) {
+            $preference = $this->preferenceRepository->findOneByCustomerAndMerchant($customer, $merchant);
+            if ($preference instanceof CustomerMerchantNotificationPreference && !$preference->isEnabled()) {
+                return;
+            }
         }
 
         $recipientEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail();
@@ -213,11 +239,21 @@ class NotificationService
     {
         return match ($type) {
             NotificationType::CUSTOMER_SIGNUP => sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat'),
-            NotificationType::CARD_CREATED => sprintf('Votre carte fidelite est prete chez %s', $merchant->getCompanyName() ?? 'Coachat'),
-            NotificationType::CARD_COMPLETED => sprintf('Votre recompense est prete chez %s', $merchant->getCompanyName() ?? 'Coachat'),
-            NotificationType::POINTS_ADDED => sprintf('Votre carte a ete mise a jour chez %s', $merchant->getCompanyName() ?? 'Coachat'),
-            NotificationType::REWARD_CLAIMED => sprintf('Recompense recuperee chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::EQUIPIER_ASSIGNED => sprintf('Votre espace équipier est actif chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::EQUIPIER_REMOVED => sprintf('Votre accès équipier a été désactivé chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CARD_CREATED => sprintf('Votre carte fidélité est prêt chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CARD_COMPLETED => sprintf('Votre récompense est prêt chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::POINTS_ADDED => sprintf('Votre carte a été mise à jour chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::REWARD_CLAIMED => sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
+    }
+
+    private function isMandatoryNotificationType(NotificationType $type): bool
+    {
+        return in_array($type, [
+            NotificationType::EQUIPIER_ASSIGNED,
+            NotificationType::EQUIPIER_REMOVED,
+        ], true);
     }
 }

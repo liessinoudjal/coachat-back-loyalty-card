@@ -6,6 +6,8 @@ enum NotificationType: string
 {
     case MERCHANT_SIGNUP = 'merchant_signup';
     case CUSTOMER_SIGNUP = 'customer_signup';
+    case EQUIPIER_ASSIGNED = 'equipier_assigned';
+    case EQUIPIER_REMOVED = 'equipier_removed';
     case CARD_CREATED = 'card_created';
     case POINTS_ADDED = 'points_added';
     case CARD_COMPLETED = 'card_completed';

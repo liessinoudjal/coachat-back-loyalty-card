@@ -184,7 +184,11 @@ class AuthController extends AbstractController
             }
 
             if (!$isSuperAdmin) {
-                $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                if ($user->getMerchant() !== null) {
+                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                } else {
+                    $this->removeUserRole($user, 'ROLE_MERCHANT');
+                }
             }
             $this->entityManager->persist($user);
             $this->entityManager->flush();
@@ -542,6 +546,16 @@ class AuthController extends AbstractController
             $roles[] = $role;
             $user->setRoles(array_values(array_unique($roles)));
         }
+    }
+
+    private function removeUserRole(User $user, string $role): void
+    {
+        $roles = array_values(array_filter(
+            $user->getRoles(),
+            static fn (string $currentRole): bool => $currentRole !== $role,
+        ));
+
+        $user->setRoles(array_values(array_unique($roles)));
     }
 
     private function buildAuthSuccessResponse(User $user): JsonResponse

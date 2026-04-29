@@ -96,10 +96,6 @@ class LoyaltyCardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        if (!$this->isMerchantOwner($user)) {
-            return new JsonResponse(['error' => 'Forbidden'], 403);
-        }
-
         $merchant = $this->resolveActorMerchant();
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
@@ -108,6 +104,13 @@ class LoyaltyCardController extends AbstractController
         $data = json_decode($request->getContent(), true);
         if (!isset($data['loyalty_program_id'])) {
             return new JsonResponse(['error' => 'loyalty_program_id required'], 400);
+        }
+
+        if (!empty($data['merchant_id'])) {
+            $requestedMerchant = $this->entityManager->getRepository(Merchant::class)->find($data['merchant_id']);
+            if (!$requestedMerchant instanceof Merchant || $requestedMerchant !== $merchant) {
+                return new JsonResponse(['error' => 'Merchant not found'], 404);
+            }
         }
 
         $program = $this->entityManager->getRepository(LoyaltyProgram::class)->find($data['loyalty_program_id']);
@@ -122,10 +125,12 @@ class LoyaltyCardController extends AbstractController
         $card->setLoyaltyProgram($program);
 
         if (!empty($data['customer_id'])) {
-            $customer = $this->entityManager->getRepository(Customer::class)->find($data['customer_id']);
-            if ($customer) {
-                $card->setCustomer($customer);
+            $customer = $this->entityManager->getRepository(Customer::class)->findByIdAndMerchant((int) $data['customer_id'], $merchant);
+            if (!$customer instanceof Customer) {
+                return new JsonResponse(['error' => 'Customer not found'], 404);
             }
+
+            $card->setCustomer($customer);
         }
 
         $this->entityManager->persist($card);
