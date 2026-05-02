@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Customer;
 use App\Entity\Merchant;
 use App\Entity\User;
+use App\Service\MerchantStaffAlertMailer;
 use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -16,6 +17,7 @@ class MerchantStaffController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly NotificationService $notificationService,
+        private readonly MerchantStaffAlertMailer $staffAlertMailer,
     ) {
     }
 
@@ -195,6 +197,9 @@ class MerchantStaffController extends AbstractController
         $this->ensureUserRole($customerUser, 'ROLE_CUSTOMER');
 
         $this->entityManager->flush();
+        
+        // Send promotion alert email (independent of notification preferences)
+        $this->staffAlertMailer->notifyMerchantRolePromoted($customer, $merchant);
 
         return new JsonResponse($this->formatStaffCustomer($customer, $merchant));
     }
@@ -255,6 +260,9 @@ class MerchantStaffController extends AbstractController
         $this->ensureUserRole($customerUser, 'ROLE_CUSTOMER');
 
         $this->entityManager->flush();
+        
+        // Send demotion alert email (independent of notification preferences)
+        $this->staffAlertMailer->notifyMerchantRoleDemoted($customer, $merchant);
 
         return new JsonResponse($this->formatStaffCustomer($customer, $merchant));
     }
@@ -322,6 +330,10 @@ class MerchantStaffController extends AbstractController
         }
 
         $this->entityManager->flush();
+        
+        // Send ownership transfer alert emails (independent of notification preferences)
+        $this->staffAlertMailer->notifyNewOwner($customer, $merchant, $user);
+        $this->staffAlertMailer->notifyFormerOwner($user, $merchant, $newOwnerUser);
 
         return new JsonResponse([
             'success' => true,

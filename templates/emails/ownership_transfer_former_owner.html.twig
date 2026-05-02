@@ -1,0 +1,61 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ former_owner_name }},</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#dbeafe; border:1px solid #7dd3fc; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:8px 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #bae6fd; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#0369a1; margin-bottom:6px;">ℹ Transfert de propriété</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                La propriété du compte commerce {{ merchant_name }} a été transférée.
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #bae6fd; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#0369a1; margin-bottom:6px;">Nouveau propriétaire</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                {{ new_owner_name }} est maintenant le propriétaire du commerce.
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #bae6fd; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#0369a1; margin-bottom:6px;">Votre nouveau rôle</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Vous avez été promu en rôle d'administrateur.
+                            </div>
+                            <div style="font-size:14px; color:#374151; margin-top:10px;">
+                                En tant qu'administrateur, vous conservez l'accès complet aux fonctionnalités administrateur du commerce. Vous ne pouvez désormais plus transférer la propriété ou modifier les permissions de propriétaire.
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#0369a1; margin-bottom:6px;">Information</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Si vous avez des questions concerning ce transfert, veuillez contacter votre équipe de gestion.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td>
+                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#0369a1; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Accéder au dashboard</a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="font-size:14px; line-height:1.7; color:#6b7280;">
+        Vous continuez à avoir accès à toutes les fonctionnalités administrateur de {{ merchant_name }}. Votre profile et vos données ne sont pas affectés par ce changement.
+    </div>
+{% endblock %}

@@ -66,6 +66,13 @@ services:
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
 
+    App\Service\MerchantStaffAlertMailer:
+        arguments:
+            $merchantLogger: '@monolog.logger.notification_merchant'
+            $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
+            $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
+                $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
+
     App\Service\EmailNotificationStrategy:
         arguments:
             $logger: '@monolog.logger.notification_customer'

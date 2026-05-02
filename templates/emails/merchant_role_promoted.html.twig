@@ -1,0 +1,56 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ customer_name }},</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f0fdf4; border:1px solid #86efac; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:8px 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #dbeafe; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#059669; margin-bottom:6px;">✓ Promotion confirmée</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Vous avez été promu administrateur chez {{ merchant_name }}.
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #dbeafe; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#059669; margin-bottom:6px;">Nouvelles permissions</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Vous pouvez maintenant :
+                            </div>
+                            <ul style="margin:10px 0 0 20px; padding:0; font-size:14px; color:#374151;">
+                                <li style="margin-bottom:6px;">Gérer les cartes de fidélité</li>
+                                <li style="margin-bottom:6px;">Ajouter et gérer les équipiers</li>
+                                <li style="margin-bottom:6px;">Consulter les statistiques détaillées</li>
+                                <li>Modifier les réglages du commerce</li>
+                            </ul>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#059669; margin-bottom:6px;">Accès immédiat</div>
+                            <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
+                                Accédez à votre dashboard pour explorer vos nouvelles fonctionnalités administrateur.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td>
+                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#059669; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Accéder au dashboard</a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="font-size:14px; line-height:1.7; color:#6b7280;">
+        Cette promotion vous donne accès à des fonctionnalités avancées de gestion. Vous pouvez à tout moment revenir à votre espace équipier en utilisant le sélecteur d'espaces.
+    </div>
+{% endblock %}
