@@ -783,6 +783,275 @@ Retourne l'utilisation actuelle du plan du commerçant connecté.
 
 **Note** : `max_customers` ou `max_programs` à `-1` signifie illimité.
 
+### List Merchant Staff (Equipiers)
+```
+GET /api/merchants/me/staff
+```
+
+Retourne la liste des clients équipiers rattachés au commerçant connecté.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Réponse :**
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "Jean Dupont",
+    "email": "jean.dupont@example.com",
+    "phone": "06 11 22 33 44",
+    "is_equipier": true,
+    "is_merchant_admin": false,
+    "is_owner": false,
+    "owner_user_id": 12,
+    "equipier_merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+    "equipier_assigned_at": "2026-05-02T09:15:00+00:00",
+    "roles": ["ROLE_CUSTOMER", "ROLE_EQUIPIER"]
+  }
+]
+```
+
+**Erreurs :**
+- `404 Merchant not found` si aucun merchant n'est résolu pour l'utilisateur
+
+### Assign Merchant Staff (Equipier)
+```
+POST /api/merchants/me/staff/{customerId}
+```
+
+Assigne un client du merchant connecté comme équipier.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Path params :**
+- `customerId` : identifiant du client à promouvoir équipier
+
+**Réponse :**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "Jean Dupont",
+  "email": "jean.dupont@example.com",
+  "phone": "06 11 22 33 44",
+  "is_equipier": true,
+  "is_merchant_admin": false,
+  "is_owner": false,
+  "owner_user_id": 12,
+  "equipier_merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "equipier_assigned_at": "2026-05-02T09:15:00+00:00",
+  "roles": ["ROLE_CUSTOMER", "ROLE_EQUIPIER"]
+}
+```
+
+**Comportement :**
+- Ajoute le rôle `ROLE_EQUIPIER` à l'utilisateur du client (et conserve `ROLE_CUSTOMER`)
+- Envoie une notification d'assignation équipier
+
+**Erreurs :**
+- `403 Forbidden` si l'utilisateur n'est pas admin merchant (`ROLE_MERCHANT`) pour ce merchant
+- `404 Customer not found` si le client n'existe pas dans le merchant courant
+- `409 customer_user_required` si le client n'est lié à aucun compte utilisateur
+- `409 customer_already_staff_for_other_merchant` si le client est déjà équipier d'un autre merchant
+
+### Unassign Merchant Staff (Equipier)
+```
+DELETE /api/merchants/me/staff/{customerId}
+```
+
+Retire le statut équipier d'un client du merchant connecté.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Path params :**
+- `customerId` : identifiant du client équipier à retirer
+
+**Réponse :**
+```json
+{
+  "success": true
+}
+```
+
+**Comportement :**
+- Retire le rôle `ROLE_EQUIPIER` de l'utilisateur lié au client
+- Retire également le rôle `ROLE_MERCHANT` si présent
+- Envoie une notification de retrait équipier
+
+**Erreurs :**
+- `403 Forbidden` si l'utilisateur n'est pas admin merchant (`ROLE_MERCHANT`) pour ce merchant
+- `404 Staff customer not found` si le client n'est pas équipier de ce merchant
+- `409 owner_role_change_forbidden` si la cible est l'owner courant
+- `409 merchant_admin_minimum_required` si le retrait ferait tomber le merchant à 0 admin
+
+### List Merchant Admin Staff (hors utilisateur courant)
+```
+GET /api/merchants/me/staff/merchant-admins
+```
+
+Retourne la liste des customers staff ayant le rôle `ROLE_MERCHANT`, en excluant l'utilisateur connecté.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Réponse :**
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "Jean Dupont",
+    "email": "jean.dupont@example.com",
+    "phone": "06 11 22 33 44",
+    "is_equipier": true,
+    "is_merchant_admin": true,
+    "is_owner": false,
+    "owner_user_id": 12,
+    "equipier_merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+    "equipier_assigned_at": "2026-05-02T09:15:00+00:00",
+    "roles": ["ROLE_CUSTOMER", "ROLE_MERCHANT"]
+  }
+]
+```
+
+**Erreurs :**
+- `403 Forbidden` si l'utilisateur n'est pas admin merchant (`ROLE_MERCHANT`) pour ce merchant
+
+### Promote Equipier To Merchant Role
+```
+POST /api/merchants/me/staff/{customerId}/merchant-role
+```
+
+Promeut un équipier en admin merchant.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Path params :**
+- `customerId` : identifiant du customer staff à promouvoir
+
+**Réponse :**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "Jean Dupont",
+  "email": "jean.dupont@example.com",
+  "phone": "06 11 22 33 44",
+  "is_equipier": true,
+  "is_merchant_admin": true,
+  "is_owner": false,
+  "owner_user_id": 12,
+  "equipier_merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "equipier_assigned_at": "2026-05-02T09:15:00+00:00",
+  "roles": ["ROLE_CUSTOMER", "ROLE_MERCHANT"]
+}
+```
+
+**Comportement :**
+- L'utilisateur ciblé doit déjà être équipier du merchant
+- Remplace `ROLE_EQUIPIER` par `ROLE_MERCHANT`
+
+**Erreurs :**
+- `403 Forbidden` si l'utilisateur n'est pas admin merchant (`ROLE_MERCHANT`) pour ce merchant
+- `404 Customer not found` si le client n'existe pas dans le merchant courant
+- `409 customer_not_equipier_for_merchant` si le customer n'est pas staff du merchant
+- `409 customer_user_required` si le client n'est lié à aucun compte utilisateur
+- `409 customer_not_equipier_role` si l'utilisateur n'a pas `ROLE_EQUIPIER`
+
+### Demote Merchant Role To Equipier
+```
+POST /api/merchants/me/staff/{customerId}/equipier-role
+```
+
+Rétrograde un admin merchant staff vers équipier.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Path params :**
+- `customerId` : identifiant du customer staff à rétrograder
+
+**Réponse :**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "Jean Dupont",
+  "email": "jean.dupont@example.com",
+  "phone": "06 11 22 33 44",
+  "is_equipier": true,
+  "is_merchant_admin": false,
+  "is_owner": false,
+  "owner_user_id": 12,
+  "equipier_merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "equipier_assigned_at": "2026-05-02T09:15:00+00:00",
+  "roles": ["ROLE_CUSTOMER", "ROLE_EQUIPIER"]
+}
+```
+
+**Comportement :**
+- Remplace `ROLE_MERCHANT` par `ROLE_EQUIPIER`
+- Empêche toute opération qui ferait tomber le merchant à 0 admin
+
+**Erreurs :**
+- `403 Forbidden` si l'utilisateur n'est pas admin merchant (`ROLE_MERCHANT`) pour ce merchant
+- `404 Staff customer not found` si le client n'est pas équipier de ce merchant
+- `409 customer_user_required` si le client n'est lié à aucun compte utilisateur
+- `409 customer_not_merchant_admin` si l'utilisateur ciblé n'a pas `ROLE_MERCHANT`
+- `409 owner_role_change_forbidden` si la cible est l'owner courant
+- `409 merchant_admin_self_downgrade_forbidden` si tentative de downgrade sur soi-même
+- `409 merchant_admin_minimum_required` si le downgrade ferait tomber le merchant à 0 admin
+
+### Transfer Merchant Ownership
+```
+POST /api/merchants/me/staff/{customerId}/transfer-ownership
+```
+
+Transfère la propriété du merchant courant vers un admin merchant staff existant.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Path params :**
+- `customerId` : identifiant du customer staff admin à promouvoir owner
+
+**Comportement :**
+- Action réservée à l'owner courant uniquement
+- La cible doit déjà être staff du merchant et déjà `ROLE_MERCHANT`
+- Le lien owner direct `merchant.user` est transféré vers la cible
+- La cible est retirée de la relation staff (plus équipier)
+- L'ancien owner perd `ROLE_MERCHANT` (sauf super admin)
+
+**Réponse :**
+```json
+{
+  "success": true,
+  "merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "previous_owner_user_id": 12,
+  "new_owner": {
+    "id": 45,
+    "name": "Jean Dupont",
+    "email": "jean.dupont@example.com",
+    "phone": "06 11 22 33 44",
+    "is_equipier": false,
+    "is_merchant_admin": true,
+    "is_owner": true,
+    "owner_user_id": 99,
+    "equipier_merchant_id": null,
+    "equipier_assigned_at": null,
+    "roles": ["ROLE_CUSTOMER", "ROLE_MERCHANT"]
+  }
+}
+```
+
+**Erreurs :**
+- `403 owner_only_action` si l'utilisateur courant n'est pas owner
+- `404 Staff customer not found` si la cible n'est pas staff du merchant
+- `409 customer_user_required` si la cible n'est liée à aucun compte
+- `409 customer_not_merchant_admin` si la cible n'a pas `ROLE_MERCHANT`
+- `409 owner_already_current` si la cible est déjà l'owner
+- `409 target_already_owner_for_other_merchant` si la cible possède déjà un autre merchant
+
 ### Update Merchant
 ```
 PUT /api/merchants/{id}

@@ -412,8 +412,8 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
-        if (!$merchant) {
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found for user'], 404);
         }
 
@@ -437,8 +437,8 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
-        if (!$merchant) {
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found for user'], 404);
         }
 
@@ -471,8 +471,8 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
-        if (!$merchant) {
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found for user'], 404);
         }
 
@@ -656,7 +656,8 @@ class CustomerController extends AbstractController
             return $merchant;
         }
 
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 

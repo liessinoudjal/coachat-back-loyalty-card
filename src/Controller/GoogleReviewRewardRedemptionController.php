@@ -145,7 +145,8 @@ class GoogleReviewRewardRedemptionController extends AbstractController
             return $merchant;
         }
 
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 

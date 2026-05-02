@@ -60,7 +60,7 @@ class RewardController extends AbstractController
 
         if ($merchantFilter && $user) {
             $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantFilter);
-            if (!$merchant instanceof Merchant || $merchant !== $user->getMerchant()) {
+            if (!$merchant instanceof Merchant || $merchant !== $this->resolveActorMerchant()) {
                 return new JsonResponse(['error' => 'Merchant not found'], 404);
             }
             $qb->andWhere('r.merchant = :merchantFilter')->setParameter('merchantFilter', $merchant);
@@ -111,7 +111,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        if (!$this->isMerchantOwner($user)) {
+        if (!$this->hasMerchantAdminRole($user)) {
             return new JsonResponse(['error' => 'Forbidden'], 403);
         }
 
@@ -218,7 +218,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        if (!$this->isMerchantOwner($user)) {
+        if (!$this->hasMerchantAdminRole($user)) {
             return new JsonResponse(['error' => 'Forbidden'], 403);
         }
 
@@ -310,15 +310,16 @@ class RewardController extends AbstractController
             return $merchant;
         }
 
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 
         return $user->getCustomer()?->getStaffMerchant();
     }
 
-    private function isMerchantOwner(object $user): bool
+    private function hasMerchantAdminRole(object $user): bool
     {
-        return method_exists($user, 'getMerchant') && $user->getMerchant() instanceof Merchant;
+        return method_exists($user, 'getRoles') && in_array('ROLE_MERCHANT', $user->getRoles(), true);
     }
 }

@@ -66,8 +66,12 @@ class LoyaltyProgramController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
-        $merchant = $user->getMerchant();
-        if (!$merchant) {
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
         }
 
@@ -120,8 +124,17 @@ class LoyaltyProgramController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$actorMerchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
         $program = $this->entityManager->getRepository(LoyaltyProgram::class)->find($id);
-        if (!$program || $program->getMerchant()->getUser() !== $user) {
+        if (!$program || $program->getMerchant() !== $actorMerchant) {
             return new JsonResponse(['error' => 'Program not found'], 404);
         }
 
@@ -173,8 +186,17 @@ class LoyaltyProgramController extends AbstractController
             return new JsonResponse(['error' => 'Unauthorized'], 401);
         }
 
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$actorMerchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
         $program = $this->entityManager->getRepository(LoyaltyProgram::class)->find($id);
-        if (!$program || $program->getMerchant()->getUser() !== $user) {
+        if (!$program || $program->getMerchant() !== $actorMerchant) {
             return new JsonResponse(['error' => 'Program not found'], 404);
         }
 
@@ -197,7 +219,8 @@ class LoyaltyProgramController extends AbstractController
             return $merchant;
         }
 
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 

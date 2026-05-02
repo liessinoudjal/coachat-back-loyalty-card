@@ -151,7 +151,7 @@ class TransactionController extends AbstractController
         }
 
         $roles = $user->getRoles();
-        if (!in_array('ROLE_EQUIPIER', $roles, true)) {
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 

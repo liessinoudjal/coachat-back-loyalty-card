@@ -184,7 +184,7 @@ class AuthController extends AbstractController
             }
 
             if (!$isSuperAdmin) {
-                if ($user->getMerchant() !== null) {
+                if ($user->getMerchant() !== null || $equipierMerchant !== null) {
                     $this->ensureUserRole($user, 'ROLE_MERCHANT');
                 } else {
                     $this->removeUserRole($user, 'ROLE_MERCHANT');
@@ -577,6 +577,7 @@ class AuthController extends AbstractController
             'merchant_context' => $merchant ? [
                 'id' => $merchant->getId()?->toRfc4122(),
                 'company_name' => $merchant->getCompanyName(),
+                'owner_user_id' => $merchant->getUser()?->getId(),
                 'is_owner' => $user->getMerchant() === $merchant,
                 'is_equipier' => $equipierMerchant === $merchant,
             ] : null,
@@ -660,7 +661,8 @@ class AuthController extends AbstractController
 
     private function resolveEquipierMerchant(User $user): ?Merchant
     {
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 
@@ -734,8 +736,8 @@ class AuthController extends AbstractController
         }
 
         $merchant = $user->getMerchant();
-        if ($merchant === null && in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
-            $merchant = $user->getCustomer()?->getStaffMerchant();
+        if ($merchant === null) {
+            $merchant = $this->resolveEquipierMerchant($user);
         }
         if (!$merchant) {
             return new JsonResponse(['error' => 'Merchant not found'], 404);
@@ -758,6 +760,7 @@ class AuthController extends AbstractController
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
                 'roles' => $user->getRoles(),
+                'is_owner' => $merchant->getUser() === $user,
                 'is_equipier' => in_array('ROLE_EQUIPIER', $user->getRoles(), true),
             ]
         ]);

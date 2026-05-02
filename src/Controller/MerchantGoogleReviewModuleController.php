@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Exception\GoogleReviewException;
 use App\Service\GoogleReviewModuleManager;
@@ -24,8 +25,8 @@ class MerchantGoogleReviewModuleController extends AbstractController
     {
         $this->denyAccessUnlessGranted('ROLE_MERCHANT');
 
-        $merchant = $this->getUser()?->getMerchant();
-        if ($merchant === null) {
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
@@ -40,8 +41,8 @@ class MerchantGoogleReviewModuleController extends AbstractController
     {
         $this->denyAccessUnlessGranted('ROLE_MERCHANT');
 
-        $merchant = $this->getUser()?->getMerchant();
-        if ($merchant === null) {
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
@@ -81,5 +82,24 @@ class MerchantGoogleReviewModuleController extends AbstractController
             'created_at' => $module->getCreatedAt()?->format(DATE_ATOM),
             'updated_at' => $module->getUpdatedAt()?->format(DATE_ATOM),
         ];
+    }
+
+    private function resolveActorMerchant(): ?Merchant
+    {
+        $user = $this->getUser();
+        if ($user === null) {
+            return null;
+        }
+
+        $merchant = $user->getMerchant();
+        if ($merchant instanceof Merchant) {
+            return $merchant;
+        }
+
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return null;
+        }
+
+        return $user->getCustomer()?->getStaffMerchant();
     }
 }

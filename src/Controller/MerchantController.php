@@ -67,6 +67,8 @@ class MerchantController extends AbstractController
 
     private function formatMerchant(Merchant $merchant): array
     {
+        $currentUser = $this->getUser();
+
         return [
             'id' => $merchant->getId(),
             'company_name' => $merchant->getCompanyName(),
@@ -82,6 +84,8 @@ class MerchantController extends AbstractController
             'accepted_terms_version' => $merchant->getAcceptedTermsVersion(),
             'accepted_terms_accepted_at' => $merchant->getAcceptedTermsAcceptedAt() ? (clone $merchant->getAcceptedTermsAcceptedAt())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z') : null,
             'subscription_status' => $merchant->getSubscriptionStatus(),
+            'owner_user_id' => $merchant->getUser()?->getId(),
+            'is_owner' => $currentUser !== null && $merchant->getUser() === $currentUser,
             'active_loyalty_program_count' => $merchant->getActiveLoyaltyProgramCount(),
             'plan' => $this->formatPlan($merchant->getPlan()),
         ];
@@ -129,7 +133,8 @@ class MerchantController extends AbstractController
             return $merchant;
         }
 
-        if (!in_array('ROLE_EQUIPIER', $user->getRoles(), true)) {
+        $roles = $user->getRoles();
+        if (!in_array('ROLE_EQUIPIER', $roles, true) && !in_array('ROLE_MERCHANT', $roles, true)) {
             return null;
         }
 
