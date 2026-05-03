@@ -1,5 +1,6 @@
 monolog:
     channels:
+        - app_error
         - notification_customer
         - notification_merchant
         - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
@@ -12,6 +13,11 @@ when@dev:
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
                 channels: ["!event"]
+            app_error:
+                type: stream
+                path: "%kernel.logs_dir%/app_error.log"
+                level: error
+                channels: [app_error]
             notification_customer:
                 type: stream
                 path: "%kernel.logs_dir%/notification_customer.log"
@@ -40,6 +46,11 @@ when@test:
                 type: stream
                 path: "%kernel.logs_dir%/%kernel.environment%.log"
                 level: debug
+            app_error:
+                type: stream
+                path: "%kernel.logs_dir%/app_error.log"
+                level: error
+                channels: [app_error]
             notification_customer:
                 type: stream
                 path: "%kernel.logs_dir%/notification_customer.log"
@@ -74,6 +85,12 @@ when@prod:
                 type: stream
                 channels: [deprecation]
                 path: php://stderr
+                formatter: monolog.formatter.json
+            app_error:
+                type: stream
+                path: "%kernel.logs_dir%/app_error.log"
+                level: error
+                channels: [app_error]
                 formatter: monolog.formatter.json
             notification_customer:
                 type: stream

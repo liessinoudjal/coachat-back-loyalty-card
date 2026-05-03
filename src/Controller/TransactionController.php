@@ -52,19 +52,47 @@ class TransactionController extends AbstractController
         $transactions = $merchant->getTransactions();
         $data = [];
         foreach ($transactions as $transaction) {
-            $data[] = [
-                'id' => $transaction->getId(),
-                'points_earned' => $transaction->getPointsEarned(),
-                'points_redeemed' => $transaction->getPointsRedeemed(),
-                'created_at' => $transaction->getCreatedAt()->format('Y-m-d H:i:s'),
-                'loyalty_card' => [
-                    'id' => $transaction->getLoyaltyCard()->getId(),
-                    'wallet_token' => $transaction->getLoyaltyCard()->getWalletToken(),
-                ],
-            ];
+            $data[] = $this->formatTransaction($transaction);
         }
 
         return new JsonResponse($data);
+    }
+
+    #[Route('/api/transactions/by-card', name: 'get_transactions_by_card', methods: ['GET'])]
+    public function getByCard(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $merchantId = $request->query->get('merchant_id');
+        if (!$merchantId) {
+            return new JsonResponse(['error' => 'merchant_id parameter required'], 400);
+        }
+
+        $cardId = $request->query->get('card_id');
+        if (!$cardId) {
+            return new JsonResponse(['error' => 'card_id parameter required'], 400);
+        }
+
+        $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantId);
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$merchant || !$actorMerchant || $merchant !== $actorMerchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $card = $this->entityManager->getRepository(LoyaltyCard::class)->find($cardId);
+        if (!$card || $card->getMerchant() !== $merchant) {
+            return new JsonResponse(['error' => 'Card not found'], 404);
+        }
+
+        $transactions = $this->entityManager->getRepository(Transaction::class)->findBy(
+            ['merchant' => $merchant, 'loyaltyCard' => $card],
+            ['createdAt' => 'DESC']
+        );
+
+        return new JsonResponse(array_map($this->formatTransaction(...), $transactions));
     }
 
     #[Route('/api/transactions', name: 'create_transaction', methods: ['POST'])]
@@ -156,5 +184,19 @@ class TransactionController extends AbstractController
         }
 
         return $user->getCustomer()?->getStaffMerchant();
+    }
+
+    private function formatTransaction(Transaction $transaction): array
+    {
+        return [
+            'id' => $transaction->getId(),
+            'points_earned' => $transaction->getPointsEarned(),
+            'points_redeemed' => $transaction->getPointsRedeemed(),
+            'created_at' => $transaction->getCreatedAt()->format('Y-m-d H:i:s'),
+            'loyalty_card' => [
+                'id' => $transaction->getLoyaltyCard()->getId(),
+                'wallet_token' => $transaction->getLoyaltyCard()->getWalletToken(),
+            ],
+        ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Entity;
 use App\Repository\CustomerRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: CustomerRepository::class)]
@@ -55,12 +56,25 @@ class Customer
     #[ORM\OneToMany(targetEntity: CustomerMerchantNotificationPreference::class, mappedBy: 'customer', orphanRemoval: true)]
     private Collection $notificationPreferences;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $acceptedTerms = false;
+
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $acceptedTermsVersion = null;
+
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    private ?\DateTimeInterface $acceptedTermsAcceptedAt = null;
+
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
+    private ?\DateTimeImmutable $createdAt = null;
+
     public function __construct()
     {
         $this->loyaltyCards = new ArrayCollection();
         $this->rewards = new ArrayCollection();
         $this->merchants = new ArrayCollection();
         $this->notificationPreferences = new ArrayCollection();
+        $this->createdAt = new \DateTimeImmutable();
     }
 
     public function getId(): ?int
@@ -278,6 +292,54 @@ class Customer
                 $notificationPreference->setCustomer(null);
             }
         }
+
+        return $this;
+    }
+
+    public function isAcceptedTerms(): bool
+    {
+        return $this->acceptedTerms;
+    }
+
+    public function setAcceptedTerms(bool $acceptedTerms): static
+    {
+        $this->acceptedTerms = $acceptedTerms;
+
+        return $this;
+    }
+
+    public function getAcceptedTermsVersion(): ?string
+    {
+        return $this->acceptedTermsVersion;
+    }
+
+    public function setAcceptedTermsVersion(?string $acceptedTermsVersion): static
+    {
+        $this->acceptedTermsVersion = $acceptedTermsVersion;
+
+        return $this;
+    }
+
+    public function getAcceptedTermsAcceptedAt(): ?\DateTimeInterface
+    {
+        return $this->acceptedTermsAcceptedAt;
+    }
+
+    public function setAcceptedTermsAcceptedAt(?\DateTimeInterface $acceptedTermsAcceptedAt): static
+    {
+        $this->acceptedTermsAcceptedAt = $acceptedTermsAcceptedAt;
+
+        return $this;
+    }
+
+    public function getCreatedAt(): ?\DateTimeImmutable
+    {
+        return $this->createdAt;
+    }
+
+    public function setCreatedAt(?\DateTimeImmutable $createdAt): static
+    {
+        $this->createdAt = $createdAt;
 
         return $this;
     }

@@ -236,10 +236,13 @@ Ce flow est dédié aux customers et ne fonctionne qu'avec un `merchant_ref` val
     "id": 42,
     "email": "customer@example.com",
     "name": "Customer Name",
+    "created_at": "2026-05-03T15:42:11+00:00",
     "merchant_ref": "uuid-merchant"
   }
 }
 ```
+
+`customer.created_at` est retourne au format ISO 8601 (`DATE_ATOM`).
 
 **Erreurs métier stables :**
 - `422` : `merchant_ref_missing`
@@ -292,10 +295,13 @@ Ce flow est dédié à la connexion d'un customer déjà existant, sans `merchan
   "customer": {
     "id": 42,
     "email": "customer@example.com",
-    "name": "Customer Name"
+    "name": "Customer Name",
+    "created_at": "2026-05-03T15:42:11+00:00"
   }
 }
 ```
+
+`customer.created_at` est retourne au format ISO 8601 (`DATE_ATOM`).
 
 **Erreurs métier stables :**
 - `400` : `redirect_uri required`
@@ -1660,6 +1666,36 @@ Retourne toutes les transactions d'un commerçant.
 ]
 ```
 
+### Get Transactions By Card
+```
+GET /api/transactions/by-card?merchant_id={merchant_id}&card_id={card_id}
+```
+
+Retourne les transactions d'une carte pour un commerçant donne.
+
+**Headers :**
+- `Authorization: Bearer <token>`
+
+**Parametres :**
+- `merchant_id` (requis) : ID UUID du commerçant
+- `card_id` (requis) : ID numerique de la carte
+
+**Reponse :**
+```json
+[
+  {
+    "id": 1,
+    "points_earned": 10,
+    "points_redeemed": 0,
+    "created_at": "2026-04-03 10:00:00",
+    "loyalty_card": {
+      "id": 19,
+      "wallet_token": "550e8400-e29b-41d4-a716-446655440000"
+    }
+  }
+]
+```
+
 ### Create Transaction
 ```
 POST /api/transactions
@@ -2084,7 +2120,8 @@ Retourne tous les clients du merchant courant (JWT merchant uniquement).
     "id": 1,
     "name": "John Doe",
     "email": "john@example.com",
-    "phone": "+1234567890"
+    "phone": "+1234567890",
+    "created_at": "2026-05-03T15:42:11+00:00"
   }
 ]
 ```
@@ -2117,7 +2154,8 @@ Retourne un client par son ID si le client appartient au merchant courant.
   "id": 1,
   "name": "John Doe",
   "email": "john@example.com",
-  "phone": "+1234567890"
+  "phone": "+1234567890",
+  "created_at": "2026-05-03T15:42:11+00:00"
 }
 ```
 
@@ -2168,7 +2206,8 @@ Retourne le profil customer + user + merchants associés pour l'onboarding/dashb
     "id": 42,
     "name": "Customer Name",
     "email": "customer@example.com",
-    "phone": null
+    "phone": null,
+    "created_at": "2026-05-03T15:42:11+00:00"
   },
   "merchants": [
     {
@@ -2188,6 +2227,8 @@ Retourne le profil customer + user + merchants associés pour l'onboarding/dashb
   ]
 }
 ```
+
+`customer.created_at` est retourne au format ISO 8601 (`DATE_ATOM`).
 
 **Erreurs :**
 - `401` : `Unauthorized`

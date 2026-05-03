@@ -71,7 +71,7 @@ services:
             $merchantLogger: '@monolog.logger.notification_merchant'
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
-                $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
+            $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
 
     App\Service\EmailNotificationStrategy:
         arguments:
@@ -82,6 +82,10 @@ services:
     App\Service\NotificationService:
         arguments:
             $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
+
+    App\EventSubscriber\ApplicationErrorLoggerSubscriber:
+        arguments:
+            $logger: '@monolog.logger.app_error'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

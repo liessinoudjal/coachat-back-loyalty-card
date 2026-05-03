@@ -85,11 +85,50 @@ class CustomerController extends AbstractController
                 'name' => $customer->getName(),
                 'email' => $customer->getEmail(),
                 'phone' => $customer->getPhone(),
+                'created_at' => $customer->getCreatedAt()?->format(DATE_ATOM),
                 'is_equipier' => $customer->getStaffMerchant() !== null,
                 'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
                 'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
+                'accepted_terms' => $customer->isAcceptedTerms(),
+                'accepted_terms_version' => $customer->getAcceptedTermsVersion(),
+                'accepted_terms_accepted_at' => $customer->getAcceptedTermsAcceptedAt()
+                    ? (clone $customer->getAcceptedTermsAcceptedAt())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z')
+                    : null,
             ],
             'merchants' => array_values($merchants),
+        ]);
+    }
+
+    #[Route('/api/customers/me/terms', name: 'customer_accept_terms', methods: ['PATCH'])]
+    public function acceptTerms(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data) || empty($data['accepted_terms_version']) || !is_string($data['accepted_terms_version'])) {
+            return new JsonResponse(['error' => 'accepted_terms_version_required'], 400);
+        }
+
+        $customer->setAcceptedTerms(true);
+        $customer->setAcceptedTermsVersion($data['accepted_terms_version']);
+        $customer->setAcceptedTermsAcceptedAt(new \DateTime());
+
+        $this->entityManager->flush();
+
+        return new JsonResponse([
+            'accepted_terms' => $customer->isAcceptedTerms(),
+            'accepted_terms_version' => $customer->getAcceptedTermsVersion(),
+            'accepted_terms_accepted_at' => $customer->getAcceptedTermsAcceptedAt()
+                ? (clone $customer->getAcceptedTermsAcceptedAt())->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z')
+                : null,
         ]);
     }
 
@@ -637,6 +676,7 @@ class CustomerController extends AbstractController
             'name' => $customer->getName(),
             'email' => $customer->getEmail(),
             'phone' => $customer->getPhone(),
+            'created_at' => $customer->getCreatedAt()?->format(DATE_ATOM),
             'is_equipier' => $customer->getStaffMerchant() !== null,
             'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
             'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),

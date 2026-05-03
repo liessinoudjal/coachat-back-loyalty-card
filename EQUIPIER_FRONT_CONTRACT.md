@@ -253,6 +253,7 @@ Autoriser:
 - lecture cards merchant: `GET /api/loyalty_cards?merchant=...`
 - scan/increment points: `POST /api/transactions`
 - lecture transactions: `GET /api/transactions?merchant=...`
+- lecture transactions par carte: `GET /api/transactions/by-card?merchant_id=...&card_id=...`
 - lecture rewards + claim qr:
   - `GET /api/rewards`
   - `GET /api/rewards/by-card/{cardId}`

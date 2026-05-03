@@ -345,6 +345,7 @@ class AuthController extends AbstractController
                 $customer->setName((string) ($googleUser->getName() ?? $googleUser->getEmail()));
                 $customer->setEmail((string) $googleUser->getEmail());
                 $customer->setUser($user);
+                $customer->setCreatedAt(new \DateTimeImmutable());
             }
 
             $shouldNotifyCustomerSignup = $customer->getId() === null || !$customer->getMerchants()->contains($merchant);
@@ -376,6 +377,7 @@ class AuthController extends AbstractController
                     'id' => $customer->getId(),
                     'email' => $customer->getEmail(),
                     'name' => $customer->getName(),
+                    'created_at' => $customer->getCreatedAt()?->format(DATE_ATOM),
                     'merchant_ref' => $merchant->getId()?->toRfc4122(),
                     'is_equipier' => $customer->getStaffMerchant() !== null,
                     'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
@@ -431,6 +433,7 @@ class AuthController extends AbstractController
                     'id' => $customer->getId(),
                     'email' => $customer->getEmail(),
                     'name' => $customer->getName(),
+                    'created_at' => $customer->getCreatedAt()?->format(DATE_ATOM),
                     'is_equipier' => $customer->getStaffMerchant() !== null,
                     'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
                 ],

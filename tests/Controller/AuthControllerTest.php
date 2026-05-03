@@ -230,7 +230,10 @@ final class AuthControllerTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame($merchantRef, $payload['customer']['merchant_ref']);
+        self::assertArrayHasKey('created_at', $payload['customer']);
         self::assertNotNull($capturedCustomer);
+        self::assertNotNull($capturedCustomer->getCreatedAt());
+        self::assertSame($capturedCustomer->getCreatedAt()?->format(DATE_ATOM), $payload['customer']['created_at']);
         self::assertSame($merchant, $capturedCustomer->getMerchant());
         self::assertTrue($capturedCustomer->getMerchants()->contains($merchant));
         self::assertNotNull($capturedPreference);

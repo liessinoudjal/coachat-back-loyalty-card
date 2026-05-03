@@ -89,6 +89,31 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertFalse($payload['is_completed']);
     }
 
+    public function testCustomerBootstrapReturnsCreatedAt(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-bootstrap', ['ROLE_USER', 'ROLE_MERCHANT']);
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Bootstrap');
+
+        $customerUser = $this->createUser('customer-bootstrap', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Bootstrap', 'customer-bootstrap@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+        $this->getEntityManager()->flush();
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request('GET', '/api/customers/me/bootstrap', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertArrayHasKey('customer', $payload);
+        self::assertArrayHasKey('created_at', $payload['customer']);
+        self::assertSame($customer->getCreatedAt()?->format(DATE_ATOM), $payload['customer']['created_at']);
+    }
+
     public function testCustomerCannotSelfEnrollTwiceIntoActiveProgram(): void
     {
         $client = static::createClient();
@@ -202,7 +227,11 @@ class CustomerSecurityControllerTest extends WebTestCase
         $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
         self::assertCount(2, $payload);
         self::assertSame('Alice', $payload[0]['name']);
+        self::assertArrayHasKey('created_at', $payload[0]);
+        self::assertSame($customerA1->getCreatedAt()?->format(DATE_ATOM), $payload[0]['created_at']);
         self::assertSame('Bob', $payload[1]['name']);
+        self::assertArrayHasKey('created_at', $payload[1]);
+        self::assertSame($customerA2->getCreatedAt()?->format(DATE_ATOM), $payload[1]['created_at']);
 
         // Merchant B lists customers - should see only B1
         $tokenB = $this->createJwtFor($userB);
@@ -266,6 +295,8 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertSame('Alice Own', $payload['name']);
         self::assertSame('alice-own@example.com', $payload['email']);
         self::assertSame('06 12 34 56 78', $payload['phone']);
+        self::assertArrayHasKey('created_at', $payload);
+        self::assertSame($customerA->getCreatedAt()?->format(DATE_ATOM), $payload['created_at']);
     }
 
     public function testQueryParameterMerchantIsIgnoredForSecurity(): void
