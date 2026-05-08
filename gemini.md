@@ -9,7 +9,7 @@ Cette API Symfony fournit un système complet de gestion de cartes de fidélité
 - Rewards (récompenses) réclamables via QR code
 - Module Avis Google merchant/customer avec session de parcours, spin et récompense QR mono-usage
 - Parcours customer authentifié (Google OAuth customer + dashboard multi-marchands)
-- Dashboard customer via `GET /api/customers/me/bootstrap`, `GET /api/customers/me/cards`, `POST /api/customers/me/cards`, `GET /api/customers/me/rewards`, `GET /api/customers/me/notification-preferences`, `GET /api/customers/me/available-programs`
+- Dashboard customer via `GET /api/customers/me/bootstrap`, `POST /api/customers/me/merchants`, `GET /api/customers/me/cards`, `POST /api/customers/me/cards`, `GET /api/customers/me/rewards`, `GET /api/customers/me/notification-preferences`, `GET /api/customers/me/available-programs`
 - Notifications client transactionnelles (email MVP, push préparé mais non implémenté)
 - Audit des notifications client via `notification_log`
 
@@ -2233,6 +2233,48 @@ Retourne le profil customer + user + merchants associés pour l'onboarding/dashb
 **Erreurs :**
 - `401` : `Unauthorized`
 - `404` : `Customer not found for user`
+
+### Customer Auto-Link Merchant (QR post-login)
+```
+POST /api/customers/me/merchants
+```
+
+Permet a un customer deja authentifie de se lier a un nouveau merchant sans repasser par OAuth Google.
+
+**Headers :**
+- `Authorization: Bearer <token>` (requis, token customer)
+- `Content-Type: application/json`
+
+**Body :**
+```json
+{
+  "merchant_ref": "merchant-uuid"
+}
+```
+
+**Reponse 200 :**
+```json
+{
+  "success": true,
+  "merchant": {
+    "id": "merchant-uuid",
+    "company_name": "Shop A"
+  }
+}
+```
+
+**Comportement :**
+- endpoint idempotent: si le customer est deja lie au merchant, retourne quand meme `200`
+- reutilise la meme logique de liaison customer ↔ merchant que `POST /api/auth/customer/google/callback`
+- active/garantit la relation customer ↔ merchant (table `customer_merchants`)
+- rend les programmes du merchant visibles immediatement dans `GET /api/customers/me/available-programs`
+- ne cree pas automatiquement de loyalty card
+
+**Erreurs metier stables :**
+- `400` : `merchant_ref_missing`
+- `401` : `Unauthorized`
+- `401` : `Customer not found for user`
+- `404` : `merchant_not_found`
 
 ### Customer Notification Preferences
 ```

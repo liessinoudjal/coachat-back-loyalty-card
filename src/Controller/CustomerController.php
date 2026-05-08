@@ -7,22 +7,30 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\Reward;
+use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Uid\Uuid;
 
 class CustomerController extends AbstractController
 {
     private $entityManager;
     private $notificationService;
+    private $customerMerchantLinker;
 
-    public function __construct(EntityManagerInterface $entityManager, NotificationService $notificationService)
+    public function __construct(
+        EntityManagerInterface $entityManager,
+        NotificationService $notificationService,
+        CustomerMerchantLinker $customerMerchantLinker,
+    )
     {
         $this->entityManager = $entityManager;
         $this->notificationService = $notificationService;
+        $this->customerMerchantLinker = $customerMerchantLinker;
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
@@ -37,6 +45,48 @@ class CustomerController extends AbstractController
             'error' => 'manual_customer_creation_disabled',
             'message' => 'Customer signup is available only via Google auth with merchant_ref QR flow.',
         ], 403);
+    }
+
+    #[Route('/api/customers/me/merchants', name: 'customer_link_merchant', methods: ['POST'])]
+    public function linkMerchant(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer) {
+            return new JsonResponse(['error' => 'Customer not found for user'], 401);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $merchantRef = is_array($data) ? ($data['merchant_ref'] ?? null) : null;
+        if (!is_string($merchantRef) || trim($merchantRef) === '') {
+            return new JsonResponse(['error' => 'merchant_ref_missing'], 400);
+        }
+
+        try {
+            $merchantUuid = Uuid::fromString(trim($merchantRef));
+        } catch (\Throwable) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantUuid);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $this->customerMerchantLinker->link($customer, $merchant);
+        $this->entityManager->flush();
+
+        return new JsonResponse([
+            'success' => true,
+            'merchant' => [
+                'id' => $merchant->getId()?->toRfc4122(),
+                'company_name' => $merchant->getCompanyName(),
+            ],
+        ]);
     }
 
     #[Route('/api/customers/me/bootstrap', name: 'get_customer_bootstrap', methods: ['GET'])]

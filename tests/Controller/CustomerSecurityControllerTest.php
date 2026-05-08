@@ -16,6 +16,75 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 class CustomerSecurityControllerTest extends WebTestCase
 {
+    public function testAuthenticatedCustomerCanAutoLinkToAnotherMerchantAndSeePrograms(): void
+    {
+        $client = static::createClient();
+
+        $merchantUserOne = $this->createUser('merchant-autolink-one');
+        $merchantOne = $this->createMerchant($merchantUserOne, 'Merchant One');
+        $programOne = $this->createLoyaltyProgram($merchantOne, 'Program One', LoyaltyProgramType::POINTS, true);
+        $programOne->setPointsTarget(120);
+
+        $merchantUserTwo = $this->createUser('merchant-autolink-two');
+        $merchantTwo = $this->createMerchant($merchantUserTwo, 'Merchant Two');
+        $programTwo = $this->createLoyaltyProgram($merchantTwo, 'Program Two', LoyaltyProgramType::STAMP, true);
+        $programTwo->setStampTarget(9);
+
+        $customerUser = $this->createUser('customer-autolink', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Auto Link', 'customer-autolink@example.com', null, $merchantOne, $customerUser);
+        $customer->addMerchant($merchantOne);
+        $this->getEntityManager()->flush();
+
+        $token = $this->createJwtFor($customerUser);
+
+        $client->request(
+            'POST',
+            '/api/customers/me/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'merchant_ref' => $merchantTwo->getId()?->toRfc4122(),
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $linkPayload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertTrue($linkPayload['success']);
+        self::assertSame($merchantTwo->getId()?->toRfc4122(), $linkPayload['merchant']['id']);
+        self::assertSame('Merchant Two', $linkPayload['merchant']['company_name']);
+
+        $client->request('GET', '/api/customers/me/available-programs', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        $programsPayload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertCount(2, $programsPayload);
+
+        $merchantNames = array_map(static fn (array $entry): string => $entry['merchant']['company_name'], $programsPayload);
+        sort($merchantNames);
+        self::assertSame(['Merchant One', 'Merchant Two'], $merchantNames);
+
+        $client->request(
+            'POST',
+            '/api/customers/me/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'merchant_ref' => $merchantOne->getId()?->toRfc4122(),
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+        $reloadedCustomer = $this->getEntityManager()->getRepository(Customer::class)->find($customer->getId());
+        self::assertInstanceOf(Customer::class, $reloadedCustomer);
+        self::assertCount(2, $reloadedCustomer->getMerchants());
+    }
+
     public function testCustomerCanListAvailableProgramsByMerchant(): void
     {
         $client = static::createClient();
@@ -53,6 +122,62 @@ class CustomerSecurityControllerTest extends WebTestCase
         self::assertTrue($payload[0]['programs'][0]['already_has_active_card']);
         self::assertSame('1 cafe offert', $payload[0]['programs'][0]['reward_description']);
         self::assertNotSame($programInactive->getId(), $payload[0]['programs'][0]['id']);
+    }
+
+    public function testAutoLinkReturns404WhenMerchantDoesNotExist(): void
+    {
+        $client = static::createClient();
+
+        $merchantUser = $this->createUser('merchant-autolink-missing');
+        $merchant = $this->createMerchant($merchantUser, 'Merchant Existing');
+
+        $customerUser = $this->createUser('customer-autolink-missing', ['ROLE_USER', 'ROLE_CUSTOMER']);
+        $customer = $this->createCustomer('Customer Missing Merchant', 'customer-missing-merchant@example.com', null, $merchant, $customerUser);
+        $customer->addMerchant($merchant);
+        $this->getEntityManager()->flush();
+
+        $token = $this->createJwtFor($customerUser);
+        $client->request(
+            'POST',
+            '/api/customers/me/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'merchant_ref' => '00000000-0000-0000-0000-000000000000',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(404);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('merchant_not_found', $payload['error']);
+    }
+
+    public function testAutoLinkReturns401WhenAuthenticatedUserHasNoCustomerProfile(): void
+    {
+        $client = static::createClient();
+
+        $userWithoutCustomer = $this->createUser('autolink-no-customer', ['ROLE_USER']);
+        $merchantUser = $this->createUser('merchant-autolink-no-customer');
+        $merchant = $this->createMerchant($merchantUser, 'Merchant No Customer');
+
+        $token = $this->createJwtFor($userWithoutCustomer);
+        $client->request(
+            'POST',
+            '/api/customers/me/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'merchant_ref' => $merchant->getId()?->toRfc4122(),
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(401);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('Customer not found for user', $payload['error']);
     }
 
     public function testCustomerCanSelfEnrollIntoProgram(): void

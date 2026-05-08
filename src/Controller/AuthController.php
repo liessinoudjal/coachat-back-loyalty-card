@@ -3,10 +3,10 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
-use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\User;
 use App\Entity\Merchant;
 use App\Repository\UserRepository;
+use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
@@ -31,6 +31,7 @@ class AuthController extends AbstractController
     private $logger;
     private $signupAlertMailer;
     private $notificationService;
+    private $customerMerchantLinker;
 
     public function __construct(
         EntityManagerInterface $entityManager,
@@ -39,7 +40,8 @@ class AuthController extends AbstractController
         RefreshTokenService $refreshTokenService,
         LoggerInterface $logger,
         SignupAlertMailer $signupAlertMailer,
-        NotificationService $notificationService
+        NotificationService $notificationService,
+        CustomerMerchantLinker $customerMerchantLinker
     ) {
         $this->entityManager = $entityManager;
         $this->jwtManager = $jwtManager;
@@ -48,6 +50,7 @@ class AuthController extends AbstractController
         $this->logger = $logger;
         $this->signupAlertMailer = $signupAlertMailer;
         $this->notificationService = $notificationService;
+        $this->customerMerchantLinker = $customerMerchantLinker;
     }
 
     #[Route('/api/auth/google', name: 'auth_google', methods: ['GET'])]
@@ -348,13 +351,11 @@ class AuthController extends AbstractController
                 $customer->setCreatedAt(new \DateTimeImmutable());
             }
 
-            $shouldNotifyCustomerSignup = $customer->getId() === null || !$customer->getMerchants()->contains($merchant);
-            $customer->addMerchant($merchant);
-            if ($customer->getMerchant() === null) {
-                $customer->setMerchant($merchant);
+            $shouldNotifyCustomerSignup = $customer->getId() === null;
+            $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $merchant);
+            if ($isNewMerchantLink) {
+                $shouldNotifyCustomerSignup = true;
             }
-
-            $this->ensureCustomerMerchantNotificationPreference($customer, $merchant);
 
             $this->entityManager->persist($user);
             $this->entityManager->persist($customer);
@@ -708,26 +709,6 @@ class AuthController extends AbstractController
         }
 
         return $this->entityManager->getRepository(Merchant::class)->find($merchantId);
-    }
-
-    private function ensureCustomerMerchantNotificationPreference(Customer $customer, Merchant $merchant): void
-    {
-        $preferenceRepository = $this->entityManager->getRepository(CustomerMerchantNotificationPreference::class);
-        $existingPreference = $preferenceRepository->findOneBy([
-            'customer' => $customer,
-            'merchant' => $merchant,
-        ]);
-
-        if ($existingPreference instanceof CustomerMerchantNotificationPreference) {
-            return;
-        }
-
-        $preference = new CustomerMerchantNotificationPreference();
-        $preference->setCustomer($customer);
-        $preference->setMerchant($merchant);
-        $preference->setEnabled(true);
-
-        $this->entityManager->persist($preference);
     }
 
     #[Route('/api/merchants/me', name: 'merchants_me', methods: ['GET'])]
