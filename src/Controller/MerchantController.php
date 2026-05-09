@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\Merchant;
+use App\Entity\MerchantAssetDownloadEvent;
 use App\Repository\PlanRepository;
 use App\Service\LegalTermsVersionProvider;
 use App\Service\SignupAlertMailer;
@@ -119,6 +120,42 @@ class MerchantController extends AbstractController
                 'programs' => $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
             ],
         ]);
+    }
+
+    #[Route('/api/merchant/asset-download-events', name: 'merchant_track_asset_download', methods: ['POST'])]
+    public function trackAssetDownload(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $eventType = $data['event_type'] ?? '';
+        $assetType = $data['asset_type'] ?? '';
+
+        if (!in_array($eventType, ['print', 'download'], true)) {
+            return new JsonResponse(['error' => 'invalid_event_type'], 422);
+        }
+
+        if (empty($assetType)) {
+            return new JsonResponse(['error' => 'missing_asset_type'], 422);
+        }
+
+        $event = new MerchantAssetDownloadEvent();
+        $event->setMerchant($merchant);
+        $event->setEventType($eventType);
+        $event->setAssetType(substr($assetType, 0, 50));
+
+        $this->entityManager->persist($event);
+        $this->entityManager->flush();
+
+        return new JsonResponse(['status' => 'recorded'], 201);
     }
 
     private function resolveActorMerchant(): ?Merchant

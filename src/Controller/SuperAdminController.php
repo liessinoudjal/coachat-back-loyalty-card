@@ -2,13 +2,20 @@
 
 namespace App\Controller;
 
+use App\Entity\Customer;
+use App\Entity\LoyaltyCard;
 use App\Entity\LoyaltyProgram;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
+use App\Entity\PromotionalOffer;
+use App\Entity\Reward;
+use App\Entity\Transaction;
 use App\Entity\User;
 use App\Repository\LoyaltyProgramRepository;
+use App\Repository\MerchantAssetDownloadEventRepository;
 use App\Repository\MerchantRepository;
 use App\Service\GoogleReviewModuleManager;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Annotation\Route;
@@ -19,6 +26,8 @@ class SuperAdminController extends AbstractController
         private readonly MerchantRepository $merchantRepository,
         private readonly LoyaltyProgramRepository $loyaltyProgramRepository,
         private readonly GoogleReviewModuleManager $googleReviewModuleManager,
+        private readonly EntityManagerInterface $em,
+        private readonly MerchantAssetDownloadEventRepository $assetDownloadEventRepository,
     ) {
     }
 
@@ -91,6 +100,182 @@ class SuperAdminController extends AbstractController
         }
 
         return new JsonResponse($this->formatGoogleReviewModule($module));
+    }
+
+    #[Route('/api/super-admin/merchants/{merchantId}/kpis', name: 'super_admin_merchant_kpis', methods: ['GET'])]
+    public function merchantKpis(string $merchantId): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $merchant = $this->merchantRepository->find($merchantId);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        // Build 12 monthly labels (oldest → newest)
+        $now = new \DateTimeImmutable();
+        $months = [];
+        for ($i = 11; $i >= 0; $i--) {
+            $months[] = $now->modify("-{$i} months")->format('Y-m');
+        }
+        $from = \DateTimeImmutable::createFromFormat('Y-m-d', $months[0] . '-01')->setTime(0, 0, 0);
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        $bucket = static function (array $rows, string $dateKey, array $months): array {
+            $b = array_fill_keys($months, 0);
+            foreach ($rows as $row) {
+                /** @var \DateTimeInterface $dt */
+                $dt = $row[$dateKey];
+                $key = $dt->format('Y-m');
+                if (isset($b[$key])) {
+                    $b[$key]++;
+                }
+            }
+            return array_values($b);
+        };
+
+        $merchantId = $merchant->getId();
+
+        // ── Customers (enrolled by this merchant via loyalty card) ─────────────
+        $customers = $this->em->createQueryBuilder()
+            ->select('DISTINCT c.id', 'c.createdAt')
+            ->from(Customer::class, 'c')
+            ->join('c.loyaltyCards', 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('c.createdAt >= :from')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->getQuery()->getArrayResult();
+
+        // ── Loyalty cards ─────────────────────────────────────────────────────
+        $loyaltyCards = $this->em->createQueryBuilder()
+            ->select('lc.id', 'lc.createdAt')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('lc.createdAt >= :from')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->getQuery()->getArrayResult();
+
+        // ── Transactions ──────────────────────────────────────────────────────
+        $transactions = $this->em->createQueryBuilder()
+            ->select('t.id', 't.createdAt')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('t.createdAt >= :from')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->getQuery()->getArrayResult();
+
+        // ── Rewards generated ─────────────────────────────────────────────────
+        $rewards = $this->em->createQueryBuilder()
+            ->select('r.id', 'r.generatedAt')
+            ->from(Reward::class, 'r')
+            ->join('r.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('r.generatedAt >= :from')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->getQuery()->getArrayResult();
+
+        // ── Promotional offers created ─────────────────────────────────────────
+        $promoOffers = $this->em->createQueryBuilder()
+            ->select('p.id', 'p.createdAt')
+            ->from(PromotionalOffer::class, 'p')
+            ->join('p.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('p.createdAt >= :from')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->getQuery()->getArrayResult();
+
+        // ── Asset download events ──────────────────────────────────────────────
+        $assetEvents = $this->assetDownloadEventRepository->findByMerchantSince($merchant, $from);
+
+        // Bucket asset events by type
+        $printByMonth = array_fill_keys($months, 0);
+        $downloadByMonth = array_fill_keys($months, 0);
+        foreach ($assetEvents as $event) {
+            /** @var \DateTimeInterface $dt */
+            $dt = $event['occurredAt'];
+            $key = $dt->format('Y-m');
+            if ($event['eventType'] === 'print' && isset($printByMonth[$key])) {
+                $printByMonth[$key]++;
+            } elseif ($event['eventType'] === 'download' && isset($downloadByMonth[$key])) {
+                $downloadByMonth[$key]++;
+            }
+        }
+
+        // ── Totals ─────────────────────────────────────────────────────────────
+        $totalCustomers = $merchant->getLoyaltyCards()
+            ->map(fn ($lc) => $lc->getCustomer())
+            ->filter(fn ($c) => $c !== null)
+            ->count();
+
+        $completedCards = $merchant->getLoyaltyCards()
+            ->filter(fn (LoyaltyCard $lc) => $lc->isCompleted())
+            ->count();
+
+        $totalCards = $merchant->getLoyaltyCards()->count();
+
+        $recentThreshold = $now->modify('-30 days');
+        $activeCustomerIds = [];
+        foreach ($merchant->getTransactions() as $t) {
+            if ($t->getCreatedAt() >= $recentThreshold && $t->getLoyaltyCard()?->getCustomer() !== null) {
+                $activeCustomerIds[$t->getLoyaltyCard()->getCustomer()->getId()] = true;
+            }
+        }
+
+        // Labels formatted for display
+        $labels = array_map(static function (string $ym): string {
+            [$y, $m] = explode('-', $ym);
+            $months_fr = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+            return $months_fr[(int) $m - 1] . ' ' . $y;
+        }, $months);
+
+        return new JsonResponse([
+            'period_labels' => $labels,
+            'customers_new' => $bucket($customers, 'createdAt', $months),
+            'loyalty_cards_new' => $bucket($loyaltyCards, 'createdAt', $months),
+            'transactions' => $bucket($transactions, 'createdAt', $months),
+            'rewards_generated' => $bucket($rewards, 'generatedAt', $months),
+            'promotional_offers_new' => $bucket($promoOffers, 'createdAt', $months),
+            'asset_downloads_print' => array_values($printByMonth),
+            'asset_downloads_download' => array_values($downloadByMonth),
+            'totals' => [
+                'customers_enrolled' => $merchant->getLoyaltyCards()
+                    ->map(fn ($lc) => $lc->getCustomer()?->getId())
+                    ->filter(fn ($id) => $id !== null)
+                    ->toArray(),
+                'customers' => count(array_unique(
+                    array_filter(
+                        $merchant->getLoyaltyCards()
+                            ->map(fn ($lc) => $lc->getCustomer()?->getId())
+                            ->toArray()
+                    )
+                )),
+                'loyalty_cards' => $totalCards,
+                'loyalty_cards_completed' => $completedCards,
+                'completion_rate' => $totalCards > 0 ? round(($completedCards / $totalCards) * 100, 1) : 0,
+                'transactions' => $merchant->getTransactions()->count(),
+                'rewards' => $merchant->getRewards()->count(),
+                'promotional_offers_total' => count($promoOffers) + $this->em->createQueryBuilder()
+                    ->select('COUNT(p.id)')
+                    ->from(PromotionalOffer::class, 'p')
+                    ->join('p.merchant', 'm')
+                    ->where('m.id = :merchantId')
+                    ->andWhere('p.createdAt < :from')
+                    ->setParameter('merchantId', $merchantId, 'uuid')
+                    ->setParameter('from', $from)
+                    ->getQuery()->getSingleScalarResult(),
+                'active_customers_last_30d' => count($activeCustomerIds),
+                'asset_downloads_print_total' => array_sum($printByMonth),
+                'asset_downloads_download_total' => array_sum($downloadByMonth),
+            ],
+        ]);
     }
 
     private function formatMerchant(Merchant $merchant): array
