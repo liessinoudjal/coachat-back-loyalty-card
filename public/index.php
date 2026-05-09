@@ -24,6 +24,19 @@ return function (array $context) {
 
         @file_put_contents($logDir.'/app_error.log', $message, FILE_APPEND);
 
+        // Symfony container is not available at boot time — use native mail().
+        $to       = $_ENV['SIGNUP_ALERT_EMAIL'] ?? getenv('SIGNUP_ALERT_EMAIL') ?: 'contact@coachat.fr';
+        $from     = $_ENV['SIGNUP_ALERT_FROM_EMAIL'] ?? getenv('SIGNUP_ALERT_FROM_EMAIL') ?: 'noreply@coachat.fr';
+        $fromName = $_ENV['SIGNUP_ALERT_FROM_NAME'] ?? getenv('SIGNUP_ALERT_FROM_NAME') ?: 'Coachat';
+        $subject  = '[ERREUR BOOT] '.$throwable::class.' — '.mb_substr($throwable->getMessage(), 0, 120);
+        $headers  = implode("\r\n", [
+            "From: {$fromName} <{$from}>",
+            'Content-Type: text/plain; charset=utf-8',
+            'X-Mailer: PHP/'.PHP_VERSION,
+        ]);
+
+        @mail($to, $subject, $message, $headers);
+
         throw $throwable;
     }
 };
