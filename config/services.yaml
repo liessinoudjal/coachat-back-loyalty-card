@@ -78,6 +78,12 @@ services:
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
             $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
 
+    App\EventSubscriber\ApplicationErrorLoggerSubscriber:
+        arguments:
+            $errorAlertEmail: '%env(SIGNUP_ALERT_EMAIL)%'
+            $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
+            $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
+
     App\Service\EmailNotificationStrategy:
         arguments:
             $logger: '@monolog.logger.notification_customer'
