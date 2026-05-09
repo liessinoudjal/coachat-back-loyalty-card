@@ -193,6 +193,32 @@ class PromotionalOfferController extends AbstractController
         return new JsonResponse($this->formatOffer($offer, $today));
     }
 
+    #[Route('/api/merchants/me/promotional-offers/{id}', name: 'merchant_promotional_offer_delete', methods: ['DELETE'])]
+    public function delete(int $id): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+
+        $merchant = $this->resolveMerchantOwner();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'promotional_offers_restricted_to_owner'], 403);
+        }
+
+        $offer = $this->offerRepository->find($id);
+        if (!$offer instanceof PromotionalOffer || $offer->getMerchant() !== $merchant) {
+            return new JsonResponse(['error' => 'promotional_offer_not_found'], 404);
+        }
+
+        $today = new \DateTimeImmutable('today');
+        if (!$this->isEditable($offer, $today)) {
+            return new JsonResponse(['error' => 'promotional_offer_not_deletable_after_start_date'], 409);
+        }
+
+        $this->entityManager->remove($offer);
+        $this->entityManager->flush();
+
+        return new JsonResponse(null, 204);
+    }
+
     #[Route('/api/promotional-offers/daily-dispatch', name: 'promotional_offer_daily_dispatch', methods: ['GET', 'POST'])]
     public function dailyDispatch(Request $request): JsonResponse
     {

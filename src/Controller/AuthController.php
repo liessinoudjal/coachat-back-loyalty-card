@@ -687,6 +687,16 @@ class AuthController extends AbstractController
         return in_array('ROLE_SUPER_ADMIN', $user->getRoles(), true);
     }
 
+    private function isMerchantLinkedUser(User $user): bool
+    {
+        if ($user->getMerchant() instanceof Merchant) {
+            return true;
+        }
+
+        return in_array('ROLE_MERCHANT', $user->getRoles(), true)
+            && $user->getCustomer()?->getStaffMerchant() instanceof Merchant;
+    }
+
     private function canBindCustomerToUser(Customer $customer, User $user): bool
     {
         $linkedUser = $customer->getUser();
