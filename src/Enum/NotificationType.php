@@ -12,4 +12,6 @@ enum NotificationType: string
     case POINTS_ADDED = 'points_added';
     case CARD_COMPLETED = 'card_completed';
     case REWARD_CLAIMED = 'reward_claimed';
+    case PROMOTIONAL_OFFER_STARTS = 'promotional_offer_starts';
+    case PROMOTIONAL_OFFER_ENDING_SOON = 'promotional_offer_ending_soon';
 }

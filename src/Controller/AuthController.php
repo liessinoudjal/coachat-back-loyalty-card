@@ -318,6 +318,13 @@ class AuthController extends AbstractController
 
             $user = $this->upsertGoogleUser($googleUser);
 
+            if ($this->isMerchantLinkedUser($user)) {
+                return new JsonResponse([
+                    'error' => 'account_already_merchant',
+                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
+                ], 409);
+            }
+
             // Keep merchant and customer login flows isolated to avoid accidental role merge.
             if ($user->getMerchant() !== null && $user->getCustomer() === null) {
                 return new JsonResponse([
@@ -409,6 +416,8 @@ class AuthController extends AbstractController
             $user = $this->upsertGoogleUser($googleUser);
 
             $customer = $this->resolveCustomerForUser($user, $googleUser);
+            $this->ensureUserRole($user, 'ROLE_CUSTOMER');
+
             if (!$this->hasCustomerAccess($user, $customer)) {
                 return new JsonResponse([
                     'error' => 'customer_not_found',

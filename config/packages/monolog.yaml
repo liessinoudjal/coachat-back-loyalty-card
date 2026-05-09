@@ -3,6 +3,7 @@ monolog:
         - app_error
         - notification_customer
         - notification_merchant
+        - promotional_offer_dispatch
         - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
 
 when@dev:
@@ -28,6 +29,11 @@ when@dev:
                 path: "%kernel.logs_dir%/notification_merchant.log"
                 level: debug
                 channels: [notification_merchant]
+            promotional_offer_dispatch:
+                type: stream
+                path: "%kernel.logs_dir%/promotional_offer_dispatch.log"
+                level: debug
+                channels: [promotional_offer_dispatch]
             console:
                 type: console
                 process_psr_3_messages: false
@@ -61,6 +67,11 @@ when@test:
                 path: "%kernel.logs_dir%/notification_merchant.log"
                 level: debug
                 channels: [notification_merchant]
+            promotional_offer_dispatch:
+                type: stream
+                path: "%kernel.logs_dir%/promotional_offer_dispatch.log"
+                level: debug
+                channels: [promotional_offer_dispatch]
 
 when@prod:
     monolog:
@@ -103,4 +114,10 @@ when@prod:
                 path: "%kernel.logs_dir%/notification_merchant.log"
                 level: info
                 channels: [notification_merchant]
+                formatter: monolog.formatter.json
+            promotional_offer_dispatch:
+                type: stream
+                path: "%kernel.logs_dir%/promotional_offer_dispatch.log"
+                level: info
+                channels: [promotional_offer_dispatch]
                 formatter: monolog.formatter.json

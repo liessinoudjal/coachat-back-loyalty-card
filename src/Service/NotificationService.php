@@ -7,6 +7,7 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\NotificationLog;
+use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
 use App\Entity\Transaction;
 use App\Enum\LoyaltyProgramType;
@@ -164,18 +165,51 @@ class NotificationService
         );
     }
 
-    public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): void
+    public function notifyPromotionalOfferStarts(Customer $customer, Merchant $merchant, PromotionalOffer $offer): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::PROMOTIONAL_OFFER_STARTS,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'offer_title' => $offer->getTitle(),
+                'offer_description' => $offer->getDescription(),
+                'offer_starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
+                'offer_ends_on' => $offer->getEndsOn()?->format('Y-m-d'),
+            ],
+        );
+    }
+
+    public function notifyPromotionalOfferEndingSoon(Customer $customer, Merchant $merchant, PromotionalOffer $offer): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::PROMOTIONAL_OFFER_ENDING_SOON,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'offer_title' => $offer->getTitle(),
+                'offer_description' => $offer->getDescription(),
+                'offer_starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
+                'offer_ends_on' => $offer->getEndsOn()?->format('Y-m-d'),
+                'days_left' => 2,
+            ],
+        );
+    }
+
+    public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): bool
     {
         if (!$this->isMandatoryNotificationType($type)) {
             $preference = $this->preferenceRepository->findOneByCustomerAndMerchant($customer, $merchant);
-            if ($preference instanceof CustomerMerchantNotificationPreference && !$preference->isEnabled()) {
-                return;
+            if ($preference instanceof CustomerMerchantNotificationPreference && !$this->isAllowedByPreference($preference, $type)) {
+                return true;
             }
         }
 
         $recipientEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail();
         if ($recipientEmail === null || trim($recipientEmail) === '') {
-            return;
+            return true;
         }
 
         $channel = $this->resolveChannel($merchant);
@@ -192,6 +226,8 @@ class NotificationService
                 ->setSentAt(new \DateTimeImmutable())
                 ->setErrorMessage(null);
             $this->entityManager->flush();
+
+            return true;
         } catch (\Throwable $exception) {
             $log
                 ->setStatus(NotificationLogStatus::FAILED)
@@ -205,6 +241,8 @@ class NotificationService
                 'channel' => $channel->value,
                 'exception' => $exception->getMessage(),
             ]);
+
+            return false;
         }
     }
 
@@ -245,6 +283,8 @@ class NotificationService
             NotificationType::CARD_COMPLETED => sprintf('Votre récompense est prêt chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::POINTS_ADDED => sprintf('Votre carte a été mise à jour chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::REWARD_CLAIMED => sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::PROMOTIONAL_OFFER_STARTS => sprintf('Nouveau bon plan disponible chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => sprintf('Plus que 2 jours pour profiter du bon plan chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
     }
@@ -255,5 +295,17 @@ class NotificationService
             NotificationType::EQUIPIER_ASSIGNED,
             NotificationType::EQUIPIER_REMOVED,
         ], true);
+    }
+
+    private function isAllowedByPreference(CustomerMerchantNotificationPreference $preference, NotificationType $type): bool
+    {
+        if (in_array($type, [
+            NotificationType::PROMOTIONAL_OFFER_STARTS,
+            NotificationType::PROMOTIONAL_OFFER_ENDING_SOON,
+        ], true)) {
+            return $preference->isPromotionalOffersEnabled();
+        }
+
+        return $preference->isEnabled();
     }
 }

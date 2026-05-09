@@ -11,8 +11,10 @@ use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
 use App\Service\NotificationService;
+use App\Service\CustomerMerchantLinker;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
+use App\Repository\CustomerMerchantNotificationPreferenceRepository;
 use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
@@ -180,6 +182,33 @@ final class AuthControllerTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('jwt-token', $payload['token']);
         self::assertSame('Customer Login', $payload['customer']['name']);
+    }
+
+    public function testCustomerLoginDirectWithMerchantLinkedAccountReturnsTokens(): void
+    {
+        $user = $this->createUser('merchant-admin@example.com', ['ROLE_USER', 'ROLE_CUSTOMER', 'ROLE_MERCHANT'], 'google-merchant-admin');
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Merchant Admin');
+        $customer = new Customer();
+        $customer->setName('Merchant Admin Staff');
+        $customer->setEmail('merchant-admin@example.com');
+        $customer->setUser($user);
+        $customer->setStaffMerchant($merchant);
+        $user->setCustomer($customer);
+
+        $controller = $this->createController(
+            userRepository: $this->createUserRepository(fn (array $criteria) => $criteria['googleId'] ?? null ? $user : null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+        );
+
+        $response = $controller->googleCustomerLoginCallback($this->createCallbackRequest());
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertContains('ROLE_CUSTOMER', $user->getRoles());
+        self::assertContains('ROLE_MERCHANT', $user->getRoles());
     }
 
     public function testCustomerLoginDirectWithoutCustomerReturnsForbidden(): void
@@ -402,6 +431,15 @@ final class AuthControllerTest extends TestCase
 
         $signupAlertMailer ??= $this->createMock(SignupAlertMailer::class);
         $notificationService ??= $this->createMock(NotificationService::class);
+        $notificationPreferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $notificationPreferenceRepository
+            ->method('findOneByCustomerAndMerchant')
+            ->willReturn(null);
+
+        $customerMerchantLinker = new CustomerMerchantLinker(
+            $entityManager,
+            $notificationPreferenceRepository,
+        );
 
         return new AuthController(
             $entityManager,
@@ -411,6 +449,7 @@ final class AuthControllerTest extends TestCase
             new NullLogger(),
             $signupAlertMailer,
             $notificationService,
+            $customerMerchantLinker,
         );
     }
 

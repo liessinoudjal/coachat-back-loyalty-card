@@ -53,7 +53,21 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'recipient_email' => $recipient,
         ]);
 
-        $emailData = $this->buildEmailData($merchant, $customer, $type, $context);
+        try {
+            $emailData = $this->buildEmailData($merchant, $customer, $type, $context);
+        } catch (\Throwable $exception) {
+            $this->logger->error('Customer email notification payload build failed.', [
+                'notification_type' => $type->value,
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+                'customer_id' => $customerId,
+                'customer_email' => $recipient,
+                'recipient_email' => $recipient,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
 
         $email = (new Email())
             ->from(new Address($this->fromEmail, $this->fromName))
@@ -103,6 +117,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             NotificationType::CARD_COMPLETED => $this->buildCardCompletedEmailData($merchant, $customer, $context),
             NotificationType::POINTS_ADDED => $this->buildPointsAddedEmailData($merchant, $customer, $context),
             NotificationType::REWARD_CLAIMED => $this->buildRewardClaimedEmailData($merchant, $customer, $context),
+            NotificationType::PROMOTIONAL_OFFER_STARTS => $this->buildPromotionalOfferStartsEmailData($merchant, $customer, $context),
+            NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => $this->buildPromotionalOfferEndingSoonEmailData($merchant, $customer, $context),
             default => throw new \InvalidArgumentException(sprintf('Unsupported email notification type "%s".', $type->value)),
         };
     }
@@ -408,6 +424,108 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
             'reward_description' => $rewardDescription,
+        ] + $googleReviewInviteContext);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, offer_title?: string, offer_description?: string, offer_starts_on?: string, offer_ends_on?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildPromotionalOfferStartsEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $offerTitle = (string) ($context['offer_title'] ?? 'Bon plan');
+        $offerDescription = (string) ($context['offer_description'] ?? 'Un nouveau bon plan est disponible.');
+        $startsOn = (string) ($context['offer_starts_on'] ?? '');
+        $endsOn = (string) ($context['offer_ends_on'] ?? '');
+        $subject = sprintf('Nouveau bon plan disponible chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Offre exceptionnelle chez %s : "%s".', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            sprintf('Détail : %s', $offerDescription),
+            $startsOn !== '' && $endsOn !== '' ? sprintf('Valable du %s au %s.', $startsOn, $endsOn) : null,
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les bons plans de ce commerçant depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/promotional_offer_starts.html.twig', [
+            'email_title' => 'Bon plan disponible',
+            'email_eyebrow' => 'Offre promotionnelle',
+            'email_accent' => 'BON PLAN',
+            'summary' => sprintf('Offre exceptionnelle chez %s : "%s".', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            'primary_value' => $offerTitle,
+            'primary_label' => 'Offre',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'offer_title' => $offerTitle,
+            'offer_description' => $offerDescription,
+            'offer_starts_on' => $startsOn,
+            'offer_ends_on' => $endsOn,
+        ] + $googleReviewInviteContext);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, offer_title?: string, offer_description?: string, offer_starts_on?: string, offer_ends_on?: string, days_left?: int} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildPromotionalOfferEndingSoonEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $offerTitle = (string) ($context['offer_title'] ?? 'Bon plan');
+        $offerDescription = (string) ($context['offer_description'] ?? 'Profitez encore de ce bon plan.');
+        $startsOn = (string) ($context['offer_starts_on'] ?? '');
+        $endsOn = (string) ($context['offer_ends_on'] ?? '');
+        $daysLeft = max(1, (int) ($context['days_left'] ?? 2));
+        $subject = sprintf('Plus que %d jours pour profiter du bon plan chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Coachat');
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Offre exceptionnelle chez %s : "%s" se termine dans %d jours.', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle, $daysLeft),
+            sprintf('Détail : %s', $offerDescription),
+            $startsOn !== '' && $endsOn !== '' ? sprintf('Valable du %s au %s.', $startsOn, $endsOn) : null,
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les bons plans de ce commerçant depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/promotional_offer_ending_soon.html.twig', [
+            'email_title' => sprintf('Plus que %d jours', $daysLeft),
+            'email_eyebrow' => 'Offre promotionnelle',
+            'email_accent' => 'DERNIERS JOURS',
+            'summary' => sprintf('"%s" se termine dans %d jours chez %s.', $offerTitle, $daysLeft, $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $offerTitle,
+            'primary_label' => 'Offre',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'offer_title' => $offerTitle,
+            'offer_description' => $offerDescription,
+            'offer_starts_on' => $startsOn,
+            'offer_ends_on' => $endsOn,
+            'days_left' => $daysLeft,
         ] + $googleReviewInviteContext);
 
         return [

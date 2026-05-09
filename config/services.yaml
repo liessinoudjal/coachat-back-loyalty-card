@@ -8,6 +8,11 @@
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
     legal_terms_current_version: '%env(LEGAL_TERMS_CURRENT_VERSION)%'
+    promotional_offers_cron_token: '%env(default::PROMOTIONAL_OFFERS_CRON_TOKEN)%'
+    promotional_offers_cron_basic_user: '%env(default::PROMOTIONAL_OFFERS_CRON_BASIC_USER)%'
+    promotional_offers_cron_basic_password: '%env(default::PROMOTIONAL_OFFERS_CRON_BASIC_PASSWORD)%'
+    promotional_offers_cron_header_name: '%env(default::PROMOTIONAL_OFFERS_CRON_HEADER_NAME)%'
+    promotional_offers_cron_header_value: '%env(default::PROMOTIONAL_OFFERS_CRON_HEADER_VALUE)%'
 
 services:
     # default configuration for services in *this* file
@@ -81,7 +86,21 @@ services:
 
     App\Service\NotificationService:
         arguments:
+            $logger: '@monolog.logger.notification_customer'
             $appFrontBaseUrl: '%env(APP_FRONT_BASE_URL)%'
+
+    App\Controller\PromotionalOfferController:
+        arguments:
+            $logger: '@monolog.logger.promotional_offer_dispatch'
+            $promotionalOffersCronToken: '%promotional_offers_cron_token%'
+            $promotionalOffersCronBasicUser: '%promotional_offers_cron_basic_user%'
+            $promotionalOffersCronBasicPassword: '%promotional_offers_cron_basic_password%'
+            $promotionalOffersCronHeaderName: '%promotional_offers_cron_header_name%'
+            $promotionalOffersCronHeaderValue: '%promotional_offers_cron_header_value%'
+
+    App\Service\PromotionalOfferNotificationDispatcher:
+        arguments:
+            $logger: '@monolog.logger.promotional_offer_dispatch'
 
     App\EventSubscriber\ApplicationErrorLoggerSubscriber:
         arguments:

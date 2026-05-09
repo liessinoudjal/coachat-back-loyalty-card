@@ -11,6 +11,7 @@ use App\Entity\LoyaltyProgram;
 use App\Entity\Merchant;
 use App\Entity\NotificationLog;
 use App\Entity\Plan;
+use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
 use App\Entity\Transaction;
 use App\Enum\LoyaltyProgramType;
@@ -290,6 +291,152 @@ final class NotificationServiceTest extends TestCase
         );
 
         $service->notifyPointsAdded($transaction);
+    }
+
+    public function testNotifyPromotionalOfferStartsUsesEmailWhenEnabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $merchant = $this->buildMerchant(false);
+        $customer = (new Customer())
+            ->setName('Alice')
+            ->setEmail('alice@example.com');
+        $offer = (new PromotionalOffer())
+            ->setMerchant($merchant)
+            ->setTitle('Bon plan de la semaine')
+            ->setDescription('Description du bon plan')
+            ->setStartsOn(new \DateTimeImmutable('2026-05-09'))
+            ->setEndsOn(new \DateTimeImmutable('2026-05-12'));
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(true)->setPromotionalOffersEnabled(true));
+
+        $emailStrategy
+            ->expects(self::once())
+            ->method('send')
+            ->with(
+                $merchant,
+                $customer,
+                NotificationType::PROMOTIONAL_OFFER_STARTS,
+                self::callback(static function (array $context): bool {
+                    return $context['offer_title'] === 'Bon plan de la semaine'
+                        && $context['offer_starts_on'] === '2026-05-09'
+                        && $context['offer_ends_on'] === '2026-05-12'
+                        && $context['dashboard_url'] === 'https://front.example.com';
+                }),
+            );
+
+        $pushStrategy->expects(self::never())->method('send');
+
+        $this->expectPersistedNotificationLog($entityManager, 1);
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyPromotionalOfferStarts($customer, $merchant, $offer);
+    }
+
+    public function testNotifyPromotionalOfferStartsSkipsWhenPromotionalPreferenceDisabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $merchant = $this->buildMerchant(false);
+        $customer = (new Customer())
+            ->setName('Alice')
+            ->setEmail('alice@example.com');
+        $offer = (new PromotionalOffer())
+            ->setMerchant($merchant)
+            ->setTitle('Bon plan de la semaine')
+            ->setDescription('Description du bon plan')
+            ->setStartsOn(new \DateTimeImmutable('2026-05-09'))
+            ->setEndsOn(new \DateTimeImmutable('2026-05-12'));
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(true)->setPromotionalOffersEnabled(false));
+
+        $emailStrategy->expects(self::never())->method('send');
+        $pushStrategy->expects(self::never())->method('send');
+        $entityManager->expects(self::never())->method('persist');
+        $entityManager->expects(self::never())->method('flush');
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyPromotionalOfferStarts($customer, $merchant, $offer);
+    }
+
+    public function testNotifyPromotionalOfferStartsIgnoresGlobalEnabledWhenPromotionalPreferenceEnabled(): void
+    {
+        $emailStrategy = $this->createMock(EmailNotificationStrategy::class);
+        $pushStrategy = $this->createMock(PushNotificationStrategy::class);
+        $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $merchant = $this->buildMerchant(false);
+        $customer = (new Customer())
+            ->setName('Alice')
+            ->setEmail('alice@example.com');
+        $offer = (new PromotionalOffer())
+            ->setMerchant($merchant)
+            ->setTitle('Bon plan de la semaine')
+            ->setDescription('Description du bon plan')
+            ->setStartsOn(new \DateTimeImmutable('2026-05-09'))
+            ->setEndsOn(new \DateTimeImmutable('2026-05-12'));
+
+        $preferenceRepository
+            ->expects(self::once())
+            ->method('findOneByCustomerAndMerchant')
+            ->with($customer, $merchant)
+            ->willReturn((new CustomerMerchantNotificationPreference())->setEnabled(false)->setPromotionalOffersEnabled(true));
+
+        $emailStrategy
+            ->expects(self::once())
+            ->method('send')
+            ->with(
+                $merchant,
+                $customer,
+                NotificationType::PROMOTIONAL_OFFER_STARTS,
+                self::isType('array'),
+            );
+
+        $pushStrategy->expects(self::never())->method('send');
+
+        $this->expectPersistedNotificationLog($entityManager, 1);
+
+        $service = new NotificationService(
+            $emailStrategy,
+            $pushStrategy,
+            $preferenceRepository,
+            $entityManager,
+            new NullLogger(),
+            'https://front.example.com',
+        );
+
+        $service->notifyPromotionalOfferStarts($customer, $merchant, $offer);
     }
 
     private function buildTransaction(bool $pushEnabled): Transaction

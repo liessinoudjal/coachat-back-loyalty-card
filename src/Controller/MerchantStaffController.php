@@ -392,7 +392,7 @@ class MerchantStaffController extends AbstractController
             'email' => $customer->getEmail(),
             'phone' => $customer->getPhone(),
             'is_equipier' => $staffMerchant !== null,
-            'is_merchant_admin' => in_array('ROLE_MERCHANT', $roles, true),
+            'is_merchant_admin' => $staffMerchant === $merchant && in_array('ROLE_MERCHANT', $roles, true),
             'is_owner' => $customerUser !== null && $ownerUser === $customerUser,
             'owner_user_id' => $ownerUser?->getId(),
             'equipier_merchant_id' => $staffMerchant?->getId()?->toRfc4122(),

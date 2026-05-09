@@ -2286,7 +2286,9 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
 
 **Règles :**
 - préférence globale par merchant
+- préférence spécifique bons plans par merchant
 - par défaut `enabled = true` à l'inscription customer via QR
+- par défaut `promotional_offers_enabled = true` à l'inscription customer via QR
 - `email` est toujours disponible
 - `push` dépend du plan merchant (`plan.has_push_notifications`)
 - pas encore de granularité séparée email/push côté customer
@@ -2297,6 +2299,8 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
 - `card_completed` : carte complétée, récompense prête à être récupérée
 - `points_added` : points ou tampons ajoutés
 - `reward_claimed` : récompense récupérée
+- `promotional_offer_starts` : bon plan qui démarre aujourd'hui
+- `promotional_offer_ending_soon` : rappel à J-2 avant fin du bon plan
 
 **Canal effectif MVP :**
 - si `plan.has_push_notifications = false` : email
@@ -2320,6 +2324,7 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
     },
     "notifications": {
       "enabled": true,
+      "promotional_offers_enabled": true,
       "available_channels": {
         "email": true,
         "push": false
@@ -2333,7 +2338,8 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
 **Body PATCH :**
 ```json
 {
-  "enabled": false
+  "enabled": false,
+  "promotional_offers_enabled": true
 }
 ```
 
@@ -2348,6 +2354,7 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
   },
   "notifications": {
     "enabled": false,
+    "promotional_offers_enabled": true,
     "available_channels": {
       "email": true,
       "push": false
@@ -2362,6 +2369,164 @@ Permet au customer de gérer l'opt-in de notifications merchant par merchant.
 - `404` : `Customer not found for user`
 - `404` : `Merchant not found for customer`
 - `400` : `enabled must be a boolean`
+- `400` : `promotional_offers_enabled must be a boolean`
+- `400` : `at_least_one_preference_required`
+
+### Merchant Promotional Offers (Bons plans)
+```
+GET /api/merchants/me/promotional-offers
+POST /api/merchants/me/promotional-offers
+PUT /api/merchants/me/promotional-offers/{id}
+```
+
+Permet au merchant owner de créer des bons plans datés (titre + description + période), de les lister (en cours / à venir / historique) et de les modifier uniquement avant la date de début.
+
+**Règles métier :**
+- `starts_on` et `ends_on` format `YYYY-MM-DD`
+- `ends_on >= starts_on`
+- modification autorisée uniquement si la date du jour est strictement avant `starts_on`
+
+**Réponse GET :**
+```json
+{
+  "items": [
+    {
+      "id": 12,
+      "merchant_id": "uuid-merchant",
+      "title": "Bon plan du mois",
+      "description": "-20% sur la gamme cafe",
+      "starts_on": "2026-05-10",
+      "ends_on": "2026-05-31",
+      "status": "upcoming",
+      "is_editable": true,
+      "start_notification_sent_at": null,
+      "ending_soon_notification_sent_at": null,
+      "created_at": "2026-05-09T09:02:10+00:00",
+      "updated_at": "2026-05-09T09:02:10+00:00"
+    }
+  ],
+  "summary": {
+    "has_any": true,
+    "has_active": false,
+    "has_upcoming": true
+  }
+}
+```
+
+**Body POST / PUT :**
+```json
+{
+  "title": "Bon plan de la semaine",
+  "description": "2 menus achetés = 1 dessert offert",
+  "starts_on": "2026-05-12",
+  "ends_on": "2026-05-19"
+}
+```
+
+**Erreurs métier stables :**
+- `422` : `title_required`
+- `422` : `title_too_long`
+- `422` : `description_required`
+- `422` : `starts_on_invalid`
+- `422` : `ends_on_invalid`
+- `422` : `date_range_invalid`
+- `409` : `promotional_offer_not_editable_after_start_date`
+
+### Promotional Offers Daily Dispatch
+```
+GET /api/promotional-offers/daily-dispatch
+POST /api/promotional-offers/daily-dispatch
+Header: X-Cron-Token: <PROMOTIONAL_OFFERS_CRON_TOKEN>
+```
+
+Endpoint prévu pour un appel quotidien (ex: 08:00) quand l'environnement ne permet pas de lancer une commande CLI.
+
+Si votre provider cron ne supporte pas POST, utilisez GET avec `?token=<PROMOTIONAL_OFFERS_CRON_TOKEN>`.
+
+#### Authentification supportée (configurable par variables d'environnement)
+
+- couche 1 (obligatoire): token applicatif
+  - env: `PROMOTIONAL_OFFERS_CRON_TOKEN`
+  - transport: header `X-Cron-Token`, ou query `token`, ou body JSON `{ "token": "..." }`
+
+- couche 2 (optionnelle): Basic Auth HTTP
+  - env: `PROMOTIONAL_OFFERS_CRON_BASIC_USER`
+  - env: `PROMOTIONAL_OFFERS_CRON_BASIC_PASSWORD`
+  - activée seulement si user/password sont définis
+
+- couche 3 (optionnelle): en-tête personnalisé
+  - env: `PROMOTIONAL_OFFERS_CRON_HEADER_NAME`
+  - env: `PROMOTIONAL_OFFERS_CRON_HEADER_VALUE`
+  - activée seulement si nom + valeur sont définis
+
+**Codes d'erreur sécurité :**
+- `401` : `unauthorized` (token invalide/absent)
+- `401` : `unauthorized_basic_auth` (Basic Auth invalide/absente alors qu'activée)
+- `401` : `unauthorized_custom_header` (en-tête invalide/absent alors qu'activé)
+- `503` : `promotional_offer_cron_token_not_configured`
+
+#### Exemple `.env` (recommandé)
+```dotenv
+PROMOTIONAL_OFFERS_CRON_TOKEN=change-me-very-long-random-token
+PROMOTIONAL_OFFERS_CRON_BASIC_USER=cron_dispatch
+PROMOTIONAL_OFFERS_CRON_BASIC_PASSWORD=change-me-strong-password
+PROMOTIONAL_OFFERS_CRON_HEADER_NAME=X-Dispatch-Secret
+PROMOTIONAL_OFFERS_CRON_HEADER_VALUE=change-me-second-secret
+```
+
+#### Configuration cronjob.org recommandée (POST)
+
+- method: `POST`
+- URL: `https://votre-domaine/api/promotional-offers/daily-dispatch`
+- schedule: tous les jours à 08:00 (`Europe/Paris`)
+- timeout: 30s ou 60s
+- retry on failure: activé (1-2 retries)
+
+**Headers :**
+- `Content-Type: application/json`
+- `X-Cron-Token: <PROMOTIONAL_OFFERS_CRON_TOKEN>`
+- `X-Dispatch-Secret: <PROMOTIONAL_OFFERS_CRON_HEADER_VALUE>` (si couche 3 activée)
+
+**HTTP Authentication :**
+- username: `<PROMOTIONAL_OFFERS_CRON_BASIC_USER>`
+- password: `<PROMOTIONAL_OFFERS_CRON_BASIC_PASSWORD>`
+
+**Body JSON (optionnel si token déjà dans header) :**
+```json
+{
+  "token": "<PROMOTIONAL_OFFERS_CRON_TOKEN>"
+}
+```
+
+#### Vérification manuelle attendue
+
+Réponse 200 :
+```json
+{
+  "date": "2026-05-09",
+  "start_notifications_sent_for_offers": 1,
+  "ending_soon_notifications_sent_for_offers": 2
+}
+```
+
+**Comportement :**
+- notifie les customers d'un merchant le premier jour d'un bon plan
+- notifie les customers à J-2 de la fin d'un bon plan
+- respecte les préférences customer : `enabled` ET `promotional_offers_enabled`
+- évite les doublons en marquant chaque bon plan après dispatch (`start_notification_sent_at`, `ending_soon_notification_sent_at`)
+
+**Réponse :**
+```json
+{
+  "date": "2026-05-09",
+  "start_notifications_sent_for_offers": 3,
+  "ending_soon_notifications_sent_for_offers": 2
+}
+```
+
+**Erreurs :**
+- `401` : `unauthorized`
+- `503` : `promotional_offer_cron_token_not_configured`
 
 ### Customer Cards Multi-Merchant
 ```

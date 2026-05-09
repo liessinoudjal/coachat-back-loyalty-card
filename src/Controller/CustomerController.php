@@ -6,7 +6,9 @@ use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
+use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
+use App\Repository\PromotionalOfferRepository;
 use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -237,8 +239,23 @@ class CustomerController extends AbstractController
         }
 
         $data = json_decode($request->getContent(), true);
-        if (!is_array($data) || !array_key_exists('enabled', $data) || !is_bool($data['enabled'])) {
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'payload_invalid'], 400);
+        }
+
+        $hasEnabled = array_key_exists('enabled', $data);
+        $hasPromotionalOffersEnabled = array_key_exists('promotional_offers_enabled', $data);
+
+        if (!$hasEnabled && !$hasPromotionalOffersEnabled) {
+            return new JsonResponse(['error' => 'at_least_one_preference_required'], 400);
+        }
+
+        if ($hasEnabled && !is_bool($data['enabled'])) {
             return new JsonResponse(['error' => 'enabled must be a boolean'], 400);
+        }
+
+        if ($hasPromotionalOffersEnabled && !is_bool($data['promotional_offers_enabled'])) {
+            return new JsonResponse(['error' => 'promotional_offers_enabled must be a boolean'], 400);
         }
 
         $preferenceRepository = $this->entityManager->getRepository(CustomerMerchantNotificationPreference::class);
@@ -254,7 +271,14 @@ class CustomerController extends AbstractController
             $this->entityManager->persist($preference);
         }
 
-        $preference->setEnabled($data['enabled']);
+        if ($hasEnabled) {
+            $preference->setEnabled($data['enabled']);
+        }
+
+        if ($hasPromotionalOffersEnabled) {
+            $preference->setPromotionalOffersEnabled($data['promotional_offers_enabled']);
+        }
+
         $this->entityManager->flush();
 
         return new JsonResponse([
@@ -653,6 +677,7 @@ class CustomerController extends AbstractController
 
         return [
             'enabled' => $preference?->isEnabled() ?? true,
+            'promotional_offers_enabled' => $preference?->isPromotionalOffersEnabled() ?? true,
             'available_channels' => [
                 'email' => true,
                 'push' => $pushAvailable,
@@ -732,6 +757,55 @@ class CustomerController extends AbstractController
             'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
             'roles' => $customer->getUser()?->getRoles() ?? ['ROLE_CUSTOMER'],
         ];
+    }
+
+    #[Route('/api/customers/me/promotional-offers', name: 'get_customer_promotional_offers', methods: ['GET'])]
+    public function listPromotionalOffers(PromotionalOfferRepository $offerRepository): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer instanceof Customer) {
+            return new JsonResponse(['error' => 'Customer not found'], 404);
+        }
+
+        $merchantsById = [];
+        foreach ($customer->getLoyaltyCards() as $card) {
+            $merchant = $card->getMerchant();
+            if ($merchant instanceof Merchant) {
+                $merchantId = $merchant->getId()?->toRfc4122();
+                if ($merchantId !== null) {
+                    $merchantsById[$merchantId] = $merchant;
+                }
+            }
+        }
+
+        $today = new \DateTimeImmutable('today');
+        $offers = $offerRepository->findActiveByMerchants(array_values($merchantsById), $today);
+
+        return new JsonResponse([
+            'items' => array_map(fn (PromotionalOffer $offer) => [
+                'id' => $offer->getId(),
+                'title' => $offer->getTitle(),
+                'description' => $offer->getDescription(),
+                'starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
+                'ends_on' => $offer->getEndsOn()?->format('Y-m-d'),
+                'merchant' => [
+                    'id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                    'company_name' => $offer->getMerchant()?->getCompanyName(),
+                ],
+            ], $offers),
+            'count' => count($offers),
+            'debug' => [
+                'customer_id' => $customer->getId(),
+                'merchant_count' => count($merchantsById),
+                'merchant_ids' => array_keys($merchantsById),
+                'today' => $today->format('Y-m-d'),
+            ],
+        ]);
     }
 
     private function resolveActorMerchant(): ?Merchant
