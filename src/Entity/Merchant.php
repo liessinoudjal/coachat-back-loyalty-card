@@ -87,6 +87,18 @@ class Merchant
     #[ORM\JoinColumn(nullable: true, referencedColumnName: 'id', columnDefinition: 'VARCHAR(36) DEFAULT NULL')]
     private ?Plan $plan = null;
 
+    #[ORM\Column(type: 'float', nullable: true)]
+    private ?float $latitude = null;
+
+    #[ORM\Column(type: 'float', nullable: true)]
+    private ?float $longitude = null;
+
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $geocodedAt = null;
+
+    #[ORM\Column(type: 'float', nullable: true)]
+    private ?float $geocodeScore = null;
+
     public function __construct()
     {
         $this->id = Uuid::v4();
@@ -273,6 +285,54 @@ class Merchant
     public function setAcceptedTermsAcceptedAt(?\DateTimeInterface $acceptedTermsAcceptedAt): static
     {
         $this->acceptedTermsAcceptedAt = $this->toMutableDateTime($acceptedTermsAcceptedAt);
+
+        return $this;
+    }
+
+    public function getLatitude(): ?float
+    {
+        return $this->latitude;
+    }
+
+    public function setLatitude(?float $latitude): static
+    {
+        $this->latitude = $latitude;
+
+        return $this;
+    }
+
+    public function getLongitude(): ?float
+    {
+        return $this->longitude;
+    }
+
+    public function setLongitude(?float $longitude): static
+    {
+        $this->longitude = $longitude;
+
+        return $this;
+    }
+
+    public function getGeocodedAt(): ?\DateTimeImmutable
+    {
+        return $this->geocodedAt;
+    }
+
+    public function setGeocodedAt(?\DateTimeImmutable $geocodedAt): static
+    {
+        $this->geocodedAt = $geocodedAt;
+
+        return $this;
+    }
+
+    public function getGeocodeScore(): ?float
+    {
+        return $this->geocodeScore;
+    }
+
+    public function setGeocodeScore(?float $geocodeScore): static
+    {
+        $this->geocodeScore = $geocodeScore;
 
         return $this;
     }

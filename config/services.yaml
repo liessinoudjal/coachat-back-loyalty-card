@@ -13,6 +13,10 @@ parameters:
     promotional_offers_cron_basic_password: '%env(default::PROMOTIONAL_OFFERS_CRON_BASIC_PASSWORD)%'
     promotional_offers_cron_header_name: '%env(default::PROMOTIONAL_OFFERS_CRON_HEADER_NAME)%'
     promotional_offers_cron_header_value: '%env(default::PROMOTIONAL_OFFERS_CRON_HEADER_VALUE)%'
+    geocode_batch_secret_default: ''
+    geocode_batch_secret: '%env(default:geocode_batch_secret_default:GEOCODE_BATCH_SECRET)%'
+    geocode_batch_enabled_default: false
+    geocode_batch_enabled: '%env(bool:default:geocode_batch_enabled_default:GEOCODE_BATCH_ENABLED)%'
 
 services:
     # default configuration for services in *this* file
@@ -108,6 +112,17 @@ services:
             $errorAlertEmail: '%env(SIGNUP_ALERT_EMAIL)%'
             $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
             $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
+
+    App\Service\GeocoderService:
+        arguments:
+            $alertEmail: '%env(SIGNUP_ALERT_EMAIL)%'
+            $fromEmail: '%env(SIGNUP_ALERT_FROM_EMAIL)%'
+            $fromName: '%env(SIGNUP_ALERT_FROM_NAME)%'
+
+    App\Controller\GeocodeBackfillController:
+        arguments:
+            $geocodeBatchSecret: '%geocode_batch_secret%'
+            $geocodeBatchEnabled: '%geocode_batch_enabled%'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

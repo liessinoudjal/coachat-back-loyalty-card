@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\Merchant;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * @extends ServiceEntityRepository<Merchant>
@@ -16,28 +17,136 @@ class MerchantRepository extends ServiceEntityRepository
         parent::__construct($registry, Merchant::class);
     }
 
-    //    /**
-    //     * @return Merchant[] Returns an array of Merchant objects
-    //     */
-    //    public function findByExampleField($value): array
-    //    {
-    //        return $this->createQueryBuilder('m')
-    //            ->andWhere('m.exampleField = :val')
-    //            ->setParameter('val', $value)
-    //            ->orderBy('m.id', 'ASC')
-    //            ->setMaxResults(10)
-    //            ->getQuery()
-    //            ->getResult()
-    //        ;
-    //    }
+    /**
+     * Returns geocoded merchants within $radiusKm of the given coordinates,
+     * ordered by distance ASC. If no coordinates are provided, returns all
+     * geocoded merchants ordered by company name.
+     *
+     * Uses native DBAL SQL for the Haversine formula because ACOS/COS/SIN/RADIANS
+     * are not registered DQL functions in Doctrine ORM.
+     *
+     * @return array<int, array{merchant: Merchant, distance_km: float|null}>
+     */
+    /**
+     * Returns geocoded merchants within the given map bounding box,
+     * ordered by distance from user coords (if provided) or by name.
+     *
+     * Uses a simple BETWEEN filter on lat/lng columns (indexable) for viewport filtering,
+     * combined with Haversine only for distance ordering — no HAVING needed.
+     *
+     * @return array<int, array{merchant: Merchant, distance_km: float|null}>
+     */
+    public function findForMap(
+        ?float $lat,
+        ?float $lng,
+        float $swLat,
+        float $swLng,
+        float $neLat,
+        float $neLng,
+    ): array {
+        if ($lat !== null && $lng !== null) {
+            // With user coords: compute distance for ordering and display
+            $sql = '
+                SELECT BIN_TO_UUID(id) AS id,
+                    (6371 * ACOS(
+                        COS(RADIANS(:lat)) * COS(RADIANS(latitude))
+                        * COS(RADIANS(longitude) - RADIANS(:lng))
+                        + SIN(RADIANS(:lat)) * SIN(RADIANS(latitude))
+                    )) AS distance_km
+                FROM merchant
+                WHERE latitude IS NOT NULL
+                  AND longitude IS NOT NULL
+                  AND latitude  BETWEEN :sw_lat AND :ne_lat
+                  AND longitude BETWEEN :sw_lng AND :ne_lng
+                ORDER BY distance_km ASC
+            ';
+            $params = [
+                'lat'    => $lat,
+                'lng'    => $lng,
+                'sw_lat' => $swLat,
+                'sw_lng' => $swLng,
+                'ne_lat' => $neLat,
+                'ne_lng' => $neLng,
+            ];
+        } else {
+            // No user coords: bounding box filter only, alphabetical order
+            $sql = '
+                SELECT BIN_TO_UUID(id) AS id, NULL AS distance_km
+                FROM merchant
+                WHERE latitude IS NOT NULL
+                  AND longitude IS NOT NULL
+                  AND latitude  BETWEEN :sw_lat AND :ne_lat
+                  AND longitude BETWEEN :sw_lng AND :ne_lng
+                ORDER BY company_name ASC
+            ';
+            $params = [
+                'sw_lat' => $swLat,
+                'sw_lng' => $swLng,
+                'ne_lat' => $neLat,
+                'ne_lng' => $neLng,
+            ];
+        }
 
-    //    public function findOneBySomeField($value): ?Merchant
-    //    {
-    //        return $this->createQueryBuilder('m')
-    //            ->andWhere('m.exampleField = :val')
-    //            ->setParameter('val', $value)
-    //            ->getQuery()
-    //            ->getOneOrNullResult()
-    //    ;
-    //    }
+        $rows = $this->getEntityManager()
+            ->getConnection()
+            ->executeQuery($sql, $params)
+            ->fetchAllAssociative();
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        $ids = array_column($rows, 'id');
+        $distanceById = array_column($rows, 'distance_km', 'id');
+
+        // Convert RFC4122 strings → Uuid objects so Doctrine's type system
+        // correctly converts them to BINARY(16) when building the IN clause.
+        $uuids = array_map(fn(string $id) => Uuid::fromString($id), $ids);
+
+        // findBy() with an array generates IN and applies UuidType conversion per element
+        $merchants = $this->findBy(['id' => $uuids]);
+
+        $merchantById = [];
+        foreach ($merchants as $m) {
+            $merchantById[$m->getId()->toRfc4122()] = $m;
+        }
+
+        $mapped = [];
+        foreach ($ids as $id) {
+            if (isset($merchantById[$id])) {
+                $d = $distanceById[$id];
+                $mapped[] = [
+                    'merchant'    => $merchantById[$id],
+                    'distance_km' => $d !== null ? round((float) $d, 2) : null,
+                ];
+            }
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * Returns merchants that have an address but no geocoordinates yet.
+     *
+     * @return Merchant[]
+     */
+    public function findNotGeocodedWithAddress(int $limit): array
+    {
+        return $this->createQueryBuilder('m')
+            ->where('m.latitude IS NULL')
+            ->andWhere('m.address IS NOT NULL AND m.address != \'\'')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    public function countNotGeocodedWithAddress(): int
+    {
+        return (int) $this->createQueryBuilder('m')
+            ->select('COUNT(m.id)')
+            ->where('m.latitude IS NULL')
+            ->andWhere('m.address IS NOT NULL AND m.address != \'\'')
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
 }
