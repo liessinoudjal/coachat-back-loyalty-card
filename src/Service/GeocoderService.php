@@ -13,7 +13,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class GeocoderService
 {
     private const BAN_API_URL = 'https://api-adresse.data.gouv.fr/search/';
-    private const MIN_SCORE = 0.7;
+    private const MIN_SCORE = 0.6;
     private const HTTP_TIMEOUT = 3.0;
 
     public function __construct(

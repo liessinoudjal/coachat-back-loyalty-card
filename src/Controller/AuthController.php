@@ -318,7 +318,10 @@ class AuthController extends AbstractController
 
             $user = $this->upsertGoogleUser($googleUser);
 
-            if ($this->isMerchantLinkedUser($user)) {
+            // Super admins are allowed to also be customers — do not block them.
+            $isSuperAdmin = $this->isSuperAdminUser($user);
+
+            if (!$isSuperAdmin && $this->isMerchantLinkedUser($user)) {
                 return new JsonResponse([
                     'error' => 'account_already_merchant',
                     'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
@@ -326,7 +329,7 @@ class AuthController extends AbstractController
             }
 
             // Keep merchant and customer login flows isolated to avoid accidental role merge.
-            if ($user->getMerchant() !== null && $user->getCustomer() === null) {
+            if (!$isSuperAdmin && $user->getMerchant() !== null && $user->getCustomer() === null) {
                 return new JsonResponse([
                     'error' => 'account_already_merchant',
                     'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
