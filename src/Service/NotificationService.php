@@ -198,6 +198,36 @@ class NotificationService
         );
     }
 
+    public function notifyPromotionalOfferFlashDayBefore(Customer $customer, Merchant $merchant, PromotionalOffer $offer): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'offer_title' => $offer->getTitle(),
+                'offer_description' => $offer->getDescription(),
+                'offer_date' => $offer->getStartsOn()?->format('Y-m-d'),
+            ],
+        );
+    }
+
+    public function notifyPromotionalOfferFlashDayOf(Customer $customer, Merchant $merchant, PromotionalOffer $offer): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'offer_title' => $offer->getTitle(),
+                'offer_description' => $offer->getDescription(),
+                'offer_date' => $offer->getStartsOn()?->format('Y-m-d'),
+            ],
+        );
+    }
+
     public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): bool
     {
         if (!$this->isMandatoryNotificationType($type)) {
@@ -285,6 +315,8 @@ class NotificationService
             NotificationType::REWARD_CLAIMED => sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::PROMOTIONAL_OFFER_STARTS => sprintf('Nouveau bon plan disponible chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => sprintf('Plus que 2 jours pour profiter du bon plan chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE => sprintf('Demain chez %s : offre flash à ne pas manquer !', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF => sprintf("Aujourd'hui seulement chez %s : offre flash !", $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
     }
@@ -302,6 +334,8 @@ class NotificationService
         if (in_array($type, [
             NotificationType::PROMOTIONAL_OFFER_STARTS,
             NotificationType::PROMOTIONAL_OFFER_ENDING_SOON,
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE,
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF,
         ], true)) {
             return $preference->isPromotionalOffersEnabled();
         }

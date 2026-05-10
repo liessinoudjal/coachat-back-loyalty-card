@@ -14,4 +14,6 @@ enum NotificationType: string
     case REWARD_CLAIMED = 'reward_claimed';
     case PROMOTIONAL_OFFER_STARTS = 'promotional_offer_starts';
     case PROMOTIONAL_OFFER_ENDING_SOON = 'promotional_offer_ending_soon';
+    case PROMOTIONAL_OFFER_FLASH_DAY_BEFORE = 'promotional_offer_flash_day_before';
+    case PROMOTIONAL_OFFER_FLASH_DAY_OF = 'promotional_offer_flash_day_of';
 }

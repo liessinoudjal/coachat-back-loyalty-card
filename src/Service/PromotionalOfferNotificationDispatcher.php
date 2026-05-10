@@ -18,16 +18,19 @@ class PromotionalOfferNotificationDispatcher
         private readonly CustomerRepository $customerRepository,
         private readonly CustomerMerchantNotificationPreferenceRepository $preferenceRepository,
         private readonly NotificationService $notificationService,
+        private readonly SignupAlertMailer $signupAlertMailer,
         private readonly EntityManagerInterface $entityManager,
         private readonly LoggerInterface $logger,
     ) {
     }
 
     /**
-     * @return array{start_notifications_sent_for_offers: int, ending_soon_notifications_sent_for_offers: int}
+     * @return array{start_notifications_sent_for_offers: int, ending_soon_notifications_sent_for_offers: int, flash_day_before_notifications_sent_for_offers: int, flash_day_of_notifications_sent_for_offers: int}
      */
     public function dispatch(\DateTimeImmutable $today): array
     {
+        $tomorrow = $today->modify('+1 day');
+        $flashDayBeforeOffers = $this->offerRepository->findFlashOffersForDayBefore($tomorrow);
         $startOffers = $this->offerRepository->findStartingOnDate($today);
         $endingSoonDate = $today->modify('+2 days');
         $endingOffers = $this->offerRepository->findEndingOnDate($endingSoonDate);
@@ -35,28 +38,68 @@ class PromotionalOfferNotificationDispatcher
         $this->logger->info('promotional_offer.dispatch.started', [
             'today' => $today->format('Y-m-d'),
             'ending_soon_date' => $endingSoonDate->format('Y-m-d'),
+            'flash_day_before_offer_count' => count($flashDayBeforeOffers),
             'start_offer_count' => count($startOffers),
             'ending_offer_count' => count($endingOffers),
         ]);
 
+        // J-1 flash notifications (single-day offers starting tomorrow)
+        $flashDayBeforeMarked = 0;
+        foreach ($flashDayBeforeOffers as $offer) {
+            $this->logger->debug('promotional_offer.dispatch.flash_day_before_processing', [
+                'offer_id' => $offer->getId(),
+                'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                'starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
+            ]);
+
+            $ok = $this->notifyForFlashDayBefore($offer);
+            if ($ok) {
+                $offer->setDayBeforeNotificationSentAt(new \DateTimeImmutable());
+                $flashDayBeforeMarked++;
+                $this->signupAlertMailer->notifyFlashOfferDispatched($offer, 'day_before');
+            } else {
+                $this->logger->warning('promotional_offer.dispatch.flash_day_before_failed_not_marked', [
+                    'offer_id' => $offer->getId(),
+                    'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                ]);
+            }
+        }
+
+        // J-0 notifications (regular or flash)
         $startMarked = 0;
+        $flashDayOfMarked = 0;
         foreach ($startOffers as $offer) {
             $this->logger->debug('promotional_offer.dispatch.start_offer_processing', [
                 'offer_id' => $offer->getId(),
                 'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
                 'starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
                 'ends_on' => $offer->getEndsOn()?->format('Y-m-d'),
+                'is_flash' => $offer->isFlash(),
             ]);
 
-            $startOk = $this->notifyForOfferStart($offer);
-            if ($startOk) {
-                $offer->setStartNotificationSentAt(new \DateTimeImmutable());
-                $startMarked++;
+            if ($offer->isFlash()) {
+                $ok = $this->notifyForFlashDayOf($offer);
+                if ($ok) {
+                    $offer->setStartNotificationSentAt(new \DateTimeImmutable());
+                    $flashDayOfMarked++;
+                    $this->signupAlertMailer->notifyFlashOfferDispatched($offer, 'day_of');
+                } else {
+                    $this->logger->warning('promotional_offer.dispatch.flash_day_of_failed_not_marked', [
+                        'offer_id' => $offer->getId(),
+                        'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                    ]);
+                }
             } else {
-                $this->logger->warning('promotional_offer.dispatch.start_offer_failed_not_marked', [
-                    'offer_id' => $offer->getId(),
-                    'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
-                ]);
+                $startOk = $this->notifyForOfferStart($offer);
+                if ($startOk) {
+                    $offer->setStartNotificationSentAt(new \DateTimeImmutable());
+                    $startMarked++;
+                } else {
+                    $this->logger->warning('promotional_offer.dispatch.start_offer_failed_not_marked', [
+                        'offer_id' => $offer->getId(),
+                        'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                    ]);
+                }
             }
         }
 
@@ -85,14 +128,68 @@ class PromotionalOfferNotificationDispatcher
 
         $this->logger->info('promotional_offer.dispatch.completed', [
             'today' => $today->format('Y-m-d'),
+            'flash_day_before_notifications_sent_for_offers' => $flashDayBeforeMarked,
             'start_notifications_sent_for_offers' => $startMarked,
+            'flash_day_of_notifications_sent_for_offers' => $flashDayOfMarked,
             'ending_soon_notifications_sent_for_offers' => $endingMarked,
         ]);
 
         return [
             'start_notifications_sent_for_offers' => $startMarked,
             'ending_soon_notifications_sent_for_offers' => $endingMarked,
+            'flash_day_before_notifications_sent_for_offers' => $flashDayBeforeMarked,
+            'flash_day_of_notifications_sent_for_offers' => $flashDayOfMarked,
         ];
+    }
+
+    private function notifyForFlashDayBefore(PromotionalOffer $offer): bool
+    {
+        $merchant = $offer->getMerchant();
+        if ($merchant === null) {
+            $this->logger->warning('promotional_offer.dispatch.flash_day_before_skipped_missing_merchant', ['offer_id' => $offer->getId()]);
+
+            return false;
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+        $hasFailure = false;
+        foreach ($customers as $customer) {
+            if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $sent = $this->notificationService->notifyPromotionalOfferFlashDayBefore($customer, $merchant, $offer);
+            if (!$sent) {
+                $hasFailure = true;
+            }
+        }
+
+        return !$hasFailure;
+    }
+
+    private function notifyForFlashDayOf(PromotionalOffer $offer): bool
+    {
+        $merchant = $offer->getMerchant();
+        if ($merchant === null) {
+            $this->logger->warning('promotional_offer.dispatch.flash_day_of_skipped_missing_merchant', ['offer_id' => $offer->getId()]);
+
+            return false;
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+        $hasFailure = false;
+        foreach ($customers as $customer) {
+            if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $sent = $this->notificationService->notifyPromotionalOfferFlashDayOf($customer, $merchant, $offer);
+            if (!$sent) {
+                $hasFailure = true;
+            }
+        }
+
+        return !$hasFailure;
     }
 
     private function notifyForOfferStart(PromotionalOffer $offer): bool

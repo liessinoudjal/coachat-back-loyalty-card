@@ -4,6 +4,7 @@ namespace App\Service;
 
 use App\Entity\Customer;
 use App\Entity\Merchant;
+use App\Entity\PromotionalOffer;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
@@ -226,6 +227,47 @@ class SignupAlertMailer
                 'merchant_email' => $merchantEmail,
             ],
             logger: $this->customerLogger,
+        );
+    }
+
+    public function notifyFlashOfferDispatched(PromotionalOffer $offer, string $triggerType): void
+    {
+        $offerId = (string) $offer->getId();
+        $offerTitle = $offer->getTitle() ?? 'n/a';
+        $offerDate = $offer->getStartsOn()?->format('Y-m-d') ?? 'n/a';
+        $merchant = $offer->getMerchant();
+        $merchantId = $merchant?->getId()?->toRfc4122() ?? 'n/a';
+        $merchantName = $merchant?->getCompanyName() ?? 'n/a';
+
+        $this->sendMessage(
+            subject: sprintf('[Flash] Offre "%s" notifiée (%s) — %s', $offerTitle, $triggerType, $merchantName),
+            textBody: implode("\n", [
+                sprintf('Offre flash notifiée (%s).', $triggerType),
+                '',
+                sprintf('Offer ID: %s', $offerId),
+                sprintf('Titre: %s', $offerTitle),
+                sprintf('Date: %s', $offerDate),
+                sprintf('Merchant ID: %s', $merchantId),
+                sprintf('Merchant: %s', $merchantName),
+                sprintf('Déclencheur: %s', $triggerType),
+            ]),
+            htmlBody: $this->twig->render('emails/signup_alert_base.html.twig', [
+                'email_title' => sprintf('Offre flash notifiée (%s)', $triggerType),
+                'email_eyebrow' => 'Alerte offre flash',
+                'email_accent' => strtoupper($triggerType),
+                'summary' => sprintf('L\'offre flash "%s" (%s) a été notifiée aux clients du commerce "%s".', $offerTitle, $triggerType, $merchantName),
+                'primary_value' => $offerTitle,
+                'primary_label' => 'Offre flash',
+                'secondary_value' => $merchantName,
+                'secondary_label' => 'Merchant',
+            ]),
+            context: [
+                'event' => 'flash_offer_dispatched',
+                'trigger_type' => $triggerType,
+                'offer_id' => $offerId,
+                'merchant_id' => $merchantId,
+            ],
+            logger: $this->merchantLogger,
         );
     }
 

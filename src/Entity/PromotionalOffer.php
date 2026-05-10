@@ -40,6 +40,9 @@ class PromotionalOffer
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $endingSoonNotificationSentAt = null;
 
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $dayBeforeNotificationSentAt = null;
+
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
     private ?\DateTimeImmutable $createdAt = null;
 
@@ -133,6 +136,27 @@ class PromotionalOffer
         $this->endingSoonNotificationSentAt = $endingSoonNotificationSentAt;
 
         return $this;
+    }
+
+    public function getDayBeforeNotificationSentAt(): ?\DateTimeImmutable
+    {
+        return $this->dayBeforeNotificationSentAt;
+    }
+
+    public function setDayBeforeNotificationSentAt(?\DateTimeImmutable $dayBeforeNotificationSentAt): static
+    {
+        $this->dayBeforeNotificationSentAt = $dayBeforeNotificationSentAt;
+
+        return $this;
+    }
+
+    public function isFlash(): bool
+    {
+        if (!$this->startsOn instanceof \DateTimeImmutable || !$this->endsOn instanceof \DateTimeImmutable) {
+            return false;
+        }
+
+        return $this->startsOn->format('Y-m-d') === $this->endsOn->format('Y-m-d');
     }
 
     public function getCreatedAt(): ?\DateTimeImmutable

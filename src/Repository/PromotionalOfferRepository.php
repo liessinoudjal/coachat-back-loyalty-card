@@ -63,6 +63,22 @@ class PromotionalOfferRepository extends ServiceEntityRepository
     }
 
     /**
+     * Find single-day ("flash") offers starting on $tomorrow whose day-before notification has not been sent yet.
+     *
+     * @return PromotionalOffer[]
+     */
+    public function findFlashOffersForDayBefore(\DateTimeImmutable $tomorrow): array
+    {
+        return $this->createQueryBuilder('offer')
+            ->andWhere('offer.startsOn = :tomorrow')
+            ->andWhere('offer.endsOn = :tomorrow')
+            ->andWhere('offer.dayBeforeNotificationSentAt IS NULL')
+            ->setParameter('tomorrow', $tomorrow, 'date_immutable')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * @param \App\Entity\Merchant[] $merchants
      * @return PromotionalOffer[]
      */

@@ -365,6 +365,8 @@ class PromotionalOfferController extends AbstractController
             'is_editable' => $this->isEditable($offer, $today),
             'start_notification_sent_at' => $offer->getStartNotificationSentAt()?->format(DATE_ATOM),
             'ending_soon_notification_sent_at' => $offer->getEndingSoonNotificationSentAt()?->format(DATE_ATOM),
+            'day_before_notification_sent_at' => $offer->getDayBeforeNotificationSentAt()?->format(DATE_ATOM),
+            'is_flash' => $offer->isFlash(),
             'created_at' => $offer->getCreatedAt()?->format(DATE_ATOM),
             'updated_at' => $offer->getUpdatedAt()?->format(DATE_ATOM),
         ];

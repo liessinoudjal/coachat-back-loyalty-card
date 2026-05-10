@@ -119,6 +119,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             NotificationType::REWARD_CLAIMED => $this->buildRewardClaimedEmailData($merchant, $customer, $context),
             NotificationType::PROMOTIONAL_OFFER_STARTS => $this->buildPromotionalOfferStartsEmailData($merchant, $customer, $context),
             NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => $this->buildPromotionalOfferEndingSoonEmailData($merchant, $customer, $context),
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE => $this->buildPromotionalOfferFlashDayBeforeEmailData($merchant, $customer, $context),
+            NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF => $this->buildPromotionalOfferFlashDayOfEmailData($merchant, $customer, $context),
             default => throw new \InvalidArgumentException(sprintf('Unsupported email notification type "%s".', $type->value)),
         };
     }
@@ -527,6 +529,104 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'offer_ends_on' => $endsOn,
             'days_left' => $daysLeft,
         ] + $googleReviewInviteContext);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, offer_title?: string, offer_description?: string, offer_date?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildPromotionalOfferFlashDayBeforeEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $offerTitle = (string) ($context['offer_title'] ?? 'Offre flash');
+        $offerDescription = (string) ($context['offer_description'] ?? 'Une offre exceptionnelle vous attend demain.');
+        $offerDate = (string) ($context['offer_date'] ?? '');
+        $subject = sprintf('Demain chez %s : offre flash à ne pas manquer !', $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Offre flash demain chez %s : "%s".', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            sprintf('Détail : %s', $offerDescription),
+            $offerDate !== '' ? sprintf('Uniquement le %s — une seule journée !', $offerDate) : null,
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les bons plans de ce commerçant depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/promotional_offer_flash_day_before.html.twig', [
+            'email_title' => 'Offre flash demain',
+            'email_eyebrow' => 'Offre exceptionnelle',
+            'email_accent' => 'DEMAIN SEULEMENT',
+            'summary' => sprintf('Offre flash demain chez %s : "%s". Une seule journée, ne la manquez pas !', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            'primary_value' => $offerTitle,
+            'primary_label' => 'Offre flash',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'offer_title' => $offerTitle,
+            'offer_description' => $offerDescription,
+            'offer_date' => $offerDate,
+            'show_google_review_invite' => false,
+            'google_review_url' => null,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, offer_title?: string, offer_description?: string, offer_date?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildPromotionalOfferFlashDayOfEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $offerTitle = (string) ($context['offer_title'] ?? 'Offre flash');
+        $offerDescription = (string) ($context['offer_description'] ?? "Une offre exceptionnelle est disponible aujourd'hui.");
+        $offerDate = (string) ($context['offer_date'] ?? '');
+        $subject = sprintf("Aujourd'hui seulement chez %s : offre flash !", $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf("Offre flash aujourd'hui chez %s : \"%s\".", $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            sprintf('Détail : %s', $offerDescription),
+            $offerDate !== '' ? sprintf('Uniquement le %s — ne la manquez pas !', $offerDate) : null,
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les bons plans de ce commerçant depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/promotional_offer_flash_day_of.html.twig', [
+            'email_title' => "Offre flash aujourd'hui",
+            'email_eyebrow' => 'Offre exceptionnelle',
+            'email_accent' => "AUJOURD'HUI SEULEMENT",
+            'summary' => sprintf("Offre flash aujourd'hui chez %s : \"%s\". Dernière chance !", $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
+            'primary_value' => $offerTitle,
+            'primary_label' => 'Offre flash',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'offer_title' => $offerTitle,
+            'offer_description' => $offerDescription,
+            'offer_date' => $offerDate,
+            'show_google_review_invite' => false,
+            'google_review_url' => null,
+        ]);
 
         return [
             'subject' => $subject,
