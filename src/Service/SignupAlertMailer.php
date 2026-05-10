@@ -72,6 +72,111 @@ class SignupAlertMailer
         );
     }
 
+    public function notifyCustomerSignupViaMap(Customer $customer, Merchant $merchant): void
+    {
+        $merchantId = $merchant->getId()?->toRfc4122() ?? 'n/a';
+        $merchantName = $merchant->getCompanyName() ?? 'n/a';
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail() ?? 'n/a';
+        $customerEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail() ?? 'n/a';
+        $customerName = $customer->getName() ?? $customer->getUser()?->getName() ?? 'n/a';
+        $customerId = $customer->getId() !== null ? (string) $customer->getId() : 'n/a';
+
+        $this->sendMessage(
+            subject: sprintf('[MAP] Nouvelle inscription customer: %s', $customerEmail),
+            textBody: implode("\n", [
+                'Un customer vient de s\'inscrire via la carte interactive (map) de l\'application.',
+                '',
+                sprintf('Customer ID: %s', $customerId),
+                sprintf('Email: %s', $customerEmail),
+                sprintf('Nom: %s', $customerName),
+                sprintf('Téléphone: %s', $customer->getPhone() ?? 'n/a'),
+                sprintf('Merchant: %s', $merchantName),
+                sprintf('Merchant ID: %s', $merchantId),
+                sprintf('Source: Carte map (inscription automatique)'),
+            ]),
+            htmlBody: $this->twig->render('emails/signup_alert_customer.html.twig', [
+                'email_title' => '[MAP] Nouveau customer inscrit',
+                'email_eyebrow' => 'Alerte inscription',
+                'email_accent' => 'Customer',
+                'summary' => 'Un client s\'est inscrit via la carte interactive (map) de l\'application.',
+                'source_label' => 'Carte map (inscription automatique)',
+                'primary_value' => $customerEmail,
+                'primary_label' => 'Email client',
+                'secondary_value' => $merchantName,
+                'secondary_label' => 'Merchant',
+                'customer' => [
+                    'id' => $customerId,
+                    'email' => $customerEmail,
+                    'name' => $customerName,
+                    'phone' => $customer->getPhone() ?? 'n/a',
+                ],
+                'merchant' => [
+                    'id' => $merchantId,
+                    'company_name' => $merchantName,
+                ],
+            ]),
+            context: [
+                'signup_type' => 'customer_map',
+                'customer_id' => $customerId,
+                'customer_email' => $customerEmail,
+                'merchant_id' => $merchantId,
+                'merchant_email' => $merchantEmail,
+            ],
+            logger: $this->customerLogger,
+        );
+    }
+
+    public function notifyMerchantNewCustomerViaMap(Customer $customer, Merchant $merchant): void
+    {
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail();
+        if ($merchantEmail === null || trim($merchantEmail) === '') {
+            $this->merchantLogger->warning('Merchant map-join notification skipped: no email.', [
+                'merchant_id' => $merchant->getId()?->toRfc4122(),
+            ]);
+            return;
+        }
+
+        $merchantName = $merchant->getCompanyName() ?? 'votre commerce';
+        $customerEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail() ?? 'n/a';
+        $customerName = $customer->getName() ?? $customer->getUser()?->getName() ?? 'n/a';
+
+        $subject = sprintf('Nouveau client inscrit via la carte Coachat : %s', $customerName);
+        $textBody = implode("\n", [
+            sprintf('Bonjour %s,', $merchantName),
+            '',
+            'Un nouveau client vient de rejoindre votre programme de fidélité depuis la carte interactive de l\'application Coachat.',
+            '',
+            sprintf('Nom : %s', $customerName),
+            sprintf('Email : %s', $customerEmail),
+            '',
+            'Vous pouvez retrouver ce client dans votre espace merchant.',
+        ]);
+
+        $email = (new \Symfony\Component\Mime\Email())
+            ->from(new \Symfony\Component\Mime\Address($this->fromEmail, $this->fromName))
+            ->to($merchantEmail)
+            ->subject($subject)
+            ->text($textBody)
+            ->html($this->twig->render('emails/merchant_new_customer_via_map.html.twig', [
+                'merchant_name' => $merchantName,
+                'customer_name' => $customerName,
+                'customer_email' => $customerEmail,
+            ]));
+
+        try {
+            $this->mailer->send($email);
+            $this->merchantLogger->info('Merchant map-join notification sent.', [
+                'merchant_email' => $merchantEmail,
+                'customer_email' => $customerEmail,
+            ]);
+        } catch (\Throwable $e) {
+            $this->merchantLogger->error('Failed to send merchant map-join notification.', [
+                'merchant_email' => $merchantEmail,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function notifyCustomerSignup(Customer $customer, Merchant $merchant): void
     {
         $merchantId = $merchant->getId()?->toRfc4122() ?? 'n/a';

@@ -4,15 +4,20 @@ namespace App\Controller;
 
 use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
+use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
+use App\Service\CustomerMerchantLinker;
+use App\Service\NotificationService;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Uid\Uuid;
 
 final class MerchantMapController extends AbstractController
 {
@@ -20,6 +25,9 @@ final class MerchantMapController extends AbstractController
         private readonly MerchantRepository $merchantRepository,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly CustomerMerchantLinker $customerMerchantLinker,
+        private readonly SignupAlertMailer $signupAlertMailer,
+        private readonly NotificationService $notificationService,
     ) {
     }
 
@@ -52,6 +60,21 @@ final class MerchantMapController extends AbstractController
 
         if (empty($rows)) {
             return new JsonResponse(['merchants' => []]);
+        }
+
+        // Index merchant IDs the customer is already linked to
+        $linkedMerchantIds = [];
+        // ManyToMany (customer_merchants table)
+        foreach ($customer->getMerchants() as $m) {
+            $id = $m->getId()?->toRfc4122();
+            if ($id !== null) {
+                $linkedMerchantIds[$id] = true;
+            }
+        }
+        // ManyToOne singular (legacy / primary merchant)
+        $primaryId = $customer->getMerchant()?->getId()?->toRfc4122();
+        if ($primaryId !== null) {
+            $linkedMerchantIds[$primaryId] = true;
         }
 
         // Pre-load customer's loyalty cards indexed by merchant id
@@ -133,6 +156,7 @@ final class MerchantMapController extends AbstractController
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
+                'is_customer_linked' => isset($linkedMerchantIds[$merchantId]),
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,
                 'google_review' => $googleReview,
@@ -140,6 +164,59 @@ final class MerchantMapController extends AbstractController
         }
 
         return new JsonResponse(['merchants' => $merchants]);
+    }
+
+    #[Route('/api/customer/merchants/map-join', name: 'customer_map_join_merchant', methods: ['POST'])]
+    public function joinFromMap(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer instanceof Customer) {
+            return new JsonResponse(['error' => 'customer_not_found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $merchantId = is_array($data) ? ($data['merchant_id'] ?? null) : null;
+
+        if (!is_string($merchantId) || trim($merchantId) === '') {
+            return new JsonResponse(['error' => 'merchant_id_missing'], 400);
+        }
+
+        try {
+            $uuid = Uuid::fromString(trim($merchantId));
+        } catch (\Throwable) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $merchant = $this->entityManager->getRepository(Merchant::class)->find($uuid);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $isNewLink = $this->customerMerchantLinker->link($customer, $merchant);
+        $this->entityManager->flush();
+
+        if ($isNewLink) {
+            // Alert admin with map source flag
+            $this->signupAlertMailer->notifyCustomerSignupViaMap($customer, $merchant);
+            // Alert the merchant by email
+            $this->signupAlertMailer->notifyMerchantNewCustomerViaMap($customer, $merchant);
+            // Send welcome email to customer
+            $this->notificationService->notifyCustomerSignup($customer, $merchant);
+        }
+
+        return new JsonResponse([
+            'success' => true,
+            'already_linked' => !$isNewLink,
+            'merchant' => [
+                'id' => $merchant->getId()?->toRfc4122(),
+                'company_name' => $merchant->getCompanyName(),
+            ],
+        ]);
     }
 
     /**

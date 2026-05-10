@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nouveau client inscrit via la carte</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f3f4f6;padding:32px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background-color:#2563eb;border-radius:16px 16px 0 0;padding:28px 32px;">
+                            <div style="font-size:22px;font-weight:800;color:#ffffff;margin-bottom:4px;">Coachat</div>
+                            <div style="font-size:13px;color:#bfdbfe;letter-spacing:0.05em;text-transform:uppercase;">Nouveau client</div>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="background:#ffffff;padding:32px;">
+                            <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:16px;">
+                                Bonjour {{ merchant_name }},
+                            </div>
+                            <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px;">
+                                Un nouveau client vient de rejoindre votre programme de fidélité directement depuis la <strong>carte interactive</strong> de l'application Coachat.
+                            </p>
+
+                            <!-- Customer card -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                   style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
+                                <tr>
+                                    <td style="padding:8px 20px;">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td style="padding:14px 0;border-bottom:1px solid #f0f0f0;">
+                                                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;margin-bottom:4px;">Nom</div>
+                                                    <div style="font-size:15px;font-weight:600;color:#111827;">{{ customer_name }}</div>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:14px 0;">
+                                                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;margin-bottom:4px;">Email</div>
+                                                    <div style="font-size:15px;font-weight:600;color:#111827;">{{ customer_email }}</div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="font-size:14px;color:#6b7280;line-height:1.7;margin:0;">
+                                Vous pouvez retrouver ce client dans votre espace commerçant Coachat.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background:#f9fafb;border-radius:0 0 16px 16px;padding:18px 32px;border-top:1px solid #e5e7eb;">
+                            <p style="font-size:12px;color:#9ca3af;margin:0;">
+                                Cet email a été envoyé automatiquement par Coachat. Ne pas répondre directement à cet email.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
