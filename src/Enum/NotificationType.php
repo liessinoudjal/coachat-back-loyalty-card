@@ -16,4 +16,7 @@ enum NotificationType: string
     case PROMOTIONAL_OFFER_ENDING_SOON = 'promotional_offer_ending_soon';
     case PROMOTIONAL_OFFER_FLASH_DAY_BEFORE = 'promotional_offer_flash_day_before';
     case PROMOTIONAL_OFFER_FLASH_DAY_OF = 'promotional_offer_flash_day_of';
+    case CONTEST_DAY_BEFORE_START = 'contest_day_before_start';
+    case CONTEST_STARTS = 'contest_starts';
+    case CONTEST_ENDING_SOON = 'contest_ending_soon';
 }

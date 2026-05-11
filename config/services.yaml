@@ -106,6 +106,10 @@ services:
         arguments:
             $logger: '@monolog.logger.promotional_offer_dispatch'
 
+    App\Service\ContestNotificationDispatcher:
+        arguments:
+            $logger: '@monolog.logger.promotional_offer_dispatch'
+
     App\EventSubscriber\ApplicationErrorLoggerSubscriber:
         arguments:
             $logger: '@monolog.logger.app_error'

@@ -30,6 +30,9 @@ class CustomerMerchantNotificationPreference
     #[ORM\Column(options: ['default' => true])]
     private bool $promotionalOffersEnabled = true;
 
+    #[ORM\Column(options: ['default' => true])]
+    private bool $contestNotificationsEnabled = true;
+
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
     private \DateTimeImmutable $createdAt;
 
@@ -106,5 +109,18 @@ class CustomerMerchantNotificationPreference
     public function getUpdatedAt(): \DateTimeImmutable
     {
         return $this->updatedAt;
+    }
+
+    public function isContestNotificationsEnabled(): bool
+    {
+        return $this->contestNotificationsEnabled;
+    }
+
+    public function setContestNotificationsEnabled(bool $contestNotificationsEnabled): static
+    {
+        $this->contestNotificationsEnabled = $contestNotificationsEnabled;
+        $this->updatedAt = new \DateTimeImmutable();
+
+        return $this;
     }
 }

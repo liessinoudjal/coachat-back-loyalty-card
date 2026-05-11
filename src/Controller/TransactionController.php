@@ -10,6 +10,7 @@ use App\Service\AppleWalletPushService;
 use App\Service\GoogleWalletSyncService;
 use App\Service\NotificationService;
 use App\Service\RewardService;
+use App\Service\ContestParticipationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,6 +27,7 @@ class TransactionController extends AbstractController
         private readonly GoogleWalletSyncService $googleWalletSyncService,
         private readonly NotificationService $notificationService,
         private readonly RewardService $rewardService,
+        private readonly ContestParticipationService $contestParticipationService,
     ) {
         $this->entityManager = $entityManager;
     }
@@ -142,6 +144,14 @@ class TransactionController extends AbstractController
 
         $this->entityManager->persist($transaction);
         $this->entityManager->flush();
+
+        // Auto-enroll customer in active contests
+        try {
+            $this->contestParticipationService->autoEnrollInActiveContests($transaction);
+        } catch (\Throwable $e) {
+            // Log but don't fail transaction on contest enrollment error
+            error_log('Contest auto-enrollment failed: ' . $e->getMessage());
+        }
 
         $justCompleted = !$previouslyCompleted && $card->isCompleted();
 

@@ -2,6 +2,7 @@
 
 namespace App\Service;
 
+use App\Entity\Contest;
 use App\Entity\Customer;
 use App\Entity\Merchant;
 use App\Entity\PromotionalOffer;
@@ -203,7 +204,7 @@ class SignupAlertMailer
                 'email_title' => 'Nouveau customer inscrit',
                 'email_eyebrow' => 'Alerte inscription',
                 'email_accent' => 'Customer',
-                'summary' => 'Un client vient de s\'inscrire depuis le parcours QR et a ete rattache a un merchant.',
+                'summary' => 'Un client vient de s\'inscrire depuis le parcours QR et a été rattaché à un merchant.',
                 'primary_value' => $customerEmail,
                 'primary_label' => 'Email client',
                 'secondary_value' => $merchantName,
@@ -265,6 +266,46 @@ class SignupAlertMailer
                 'event' => 'flash_offer_dispatched',
                 'trigger_type' => $triggerType,
                 'offer_id' => $offerId,
+                'merchant_id' => $merchantId,
+            ],
+            logger: $this->merchantLogger,
+        );
+    }
+
+    public function notifyContestCreated(Contest $contest): void
+    {
+        $contestId = $contest->getId()?->toRfc4122() ?? 'n/a';
+        $merchant = $contest->getMerchant();
+        $merchantId = $merchant?->getId()?->toRfc4122() ?? 'n/a';
+        $merchantName = $merchant?->getCompanyName() ?? 'n/a';
+
+        $this->sendMessage(
+            subject: sprintf('[Contest] Nouveau jeu concours créé: %s', $contest->getTitle() ?: 'n/a'),
+            textBody: implode("\n", [
+                'Un nouveau jeu concours vient d\'être créé.',
+                '',
+                sprintf('Contest ID: %s', $contestId),
+                sprintf('Titre: %s', $contest->getTitle() ?: 'n/a'),
+                sprintf('Description: %s', $contest->getDescription() ?: 'n/a'),
+                sprintf('Début: %s', $contest->getStartAt()?->format(DATE_ATOM) ?? 'n/a'),
+                sprintf('Fin: %s', $contest->getEndAt()?->format(DATE_ATOM) ?? 'n/a'),
+                sprintf('Tirage: %s', $contest->getDrawAt()?->format(DATE_ATOM) ?? 'n/a'),
+                sprintf('Merchant ID: %s', $merchantId),
+                sprintf('Merchant: %s', $merchantName),
+            ]),
+            htmlBody: $this->twig->render('emails/signup_alert_base.html.twig', [
+                'email_title' => 'Nouveau jeu concours créé',
+                'email_eyebrow' => 'Alerte concours',
+                'email_accent' => 'CONTEST',
+                'summary' => sprintf('Le concours "%s" a été créé pour le commerce "%s".', $contest->getTitle() ?: 'n/a', $merchantName),
+                'primary_value' => $contest->getTitle() ?: 'n/a',
+                'primary_label' => 'Concours',
+                'secondary_value' => $merchantName,
+                'secondary_label' => 'Merchant',
+            ]),
+            context: [
+                'event' => 'contest_created',
+                'contest_id' => $contestId,
                 'merchant_id' => $merchantId,
             ],
             logger: $this->merchantLogger,

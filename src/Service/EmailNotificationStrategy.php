@@ -121,6 +121,9 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => $this->buildPromotionalOfferEndingSoonEmailData($merchant, $customer, $context),
             NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE => $this->buildPromotionalOfferFlashDayBeforeEmailData($merchant, $customer, $context),
             NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF => $this->buildPromotionalOfferFlashDayOfEmailData($merchant, $customer, $context),
+            NotificationType::CONTEST_DAY_BEFORE_START => $this->buildContestDayBeforeStartEmailData($merchant, $customer, $context),
+            NotificationType::CONTEST_STARTS => $this->buildContestStartsEmailData($merchant, $customer, $context),
+            NotificationType::CONTEST_ENDING_SOON => $this->buildContestEndingSoonEmailData($merchant, $customer, $context),
             default => throw new \InvalidArgumentException(sprintf('Unsupported email notification type "%s".', $type->value)),
         };
     }
@@ -626,6 +629,161 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'offer_date' => $offerDate,
             'show_google_review_invite' => false,
             'google_review_url' => null,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, contest_title?: string, contest_description?: string, contest_start_at?: string, contest_end_at?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildContestDayBeforeStartEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $contestTitle = (string) ($context['contest_title'] ?? 'Jeu concours');
+        $contestDescription = (string) ($context['contest_description'] ?? 'Un nouveau jeu concours arrive.');
+        $startAt = (string) ($context['contest_start_at'] ?? '');
+        $endAt = (string) ($context['contest_end_at'] ?? '');
+        $subject = sprintf('Demain, nouveau jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Demain, le jeu concours "%s" commence chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
+            sprintf('Détail : %s', $contestDescription),
+            $startAt !== '' && $endAt !== '' ? sprintf('Période : du %s au %s.', $startAt, $endAt) : null,
+            'Comment s\'inscrire : présentez votre carte de fidélité en magasin lors de vos achats.',
+            'Plus vous faites scanner votre carte, plus vous augmentez vos chances de remporter un prix.',
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les notifications concours depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/contest_day_before_start.html.twig', [
+            'email_title' => 'Jeu concours demain',
+            'email_eyebrow' => 'Jeu concours',
+            'email_accent' => 'J-1',
+            'summary' => sprintf('Le jeu concours "%s" démarre demain chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $contestTitle,
+            'primary_label' => 'Concours',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'contest_title' => $contestTitle,
+            'contest_description' => $contestDescription,
+            'contest_start_at' => $startAt,
+            'contest_end_at' => $endAt,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, contest_title?: string, contest_description?: string, contest_start_at?: string, contest_end_at?: string} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildContestStartsEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $contestTitle = (string) ($context['contest_title'] ?? 'Jeu concours');
+        $contestDescription = (string) ($context['contest_description'] ?? 'Le jeu concours est ouvert.');
+        $startAt = (string) ($context['contest_start_at'] ?? '');
+        $endAt = (string) ($context['contest_end_at'] ?? '');
+        $subject = sprintf('Le jeu concours commence aujourd\'hui chez %s', $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Le jeu concours "%s" est maintenant ouvert chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
+            sprintf('Détail : %s', $contestDescription),
+            $startAt !== '' && $endAt !== '' ? sprintf('Période : du %s au %s.', $startAt, $endAt) : null,
+            'Comment s\'inscrire : présentez votre carte de fidélité en magasin lors de vos achats.',
+            'Plus vous faites scanner votre carte, plus vous augmentez vos chances de remporter un prix.',
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les notifications concours depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/contest_starts.html.twig', [
+            'email_title' => 'Jeu concours ouvert',
+            'email_eyebrow' => 'Jeu concours',
+            'email_accent' => 'J-0',
+            'summary' => sprintf('Le jeu concours "%s" démarre aujourd\'hui chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $contestTitle,
+            'primary_label' => 'Concours',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'contest_title' => $contestTitle,
+            'contest_description' => $contestDescription,
+            'contest_start_at' => $startAt,
+            'contest_end_at' => $endAt,
+        ]);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{dashboard_url?: string, contest_title?: string, contest_description?: string, contest_start_at?: string, contest_end_at?: string, days_left?: int} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildContestEndingSoonEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $contestTitle = (string) ($context['contest_title'] ?? 'Jeu concours');
+        $contestDescription = (string) ($context['contest_description'] ?? 'Le jeu concours se termine bientôt.');
+        $startAt = (string) ($context['contest_start_at'] ?? '');
+        $endAt = (string) ($context['contest_end_at'] ?? '');
+        $daysLeft = max(1, (int) ($context['days_left'] ?? 2));
+        $subject = sprintf('Plus que %d jours pour participer au jeu concours chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Coachat');
+
+        $text = implode("\n", [
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Le jeu concours "%s" se termine dans %d jours chez %s.', $contestTitle, $daysLeft, $merchant->getCompanyName() ?? 'ce commerce'),
+            sprintf('Détail : %s', $contestDescription),
+            $startAt !== '' && $endAt !== '' ? sprintf('Période : du %s au %s.', $startAt, $endAt) : null,
+            'Comment s\'inscrire : présentez votre carte de fidélité en magasin lors de vos achats.',
+            'Plus vous faites scanner votre carte, plus vous augmentez vos chances de remporter un prix.',
+            $dashboardUrl !== '' ? sprintf('Accéder au dashboard : %s', $dashboardUrl) : null,
+            'Vous pouvez désactiver à tout moment les notifications concours depuis votre profil client.',
+        ]);
+
+        $html = $this->twig->render('emails/contest_ending_soon.html.twig', [
+            'email_title' => sprintf('Plus que %d jours', $daysLeft),
+            'email_eyebrow' => 'Jeu concours',
+            'email_accent' => 'DERNIERE LIGNE DROITE',
+            'summary' => sprintf('Le jeu concours "%s" se termine dans %d jours chez %s.', $contestTitle, $daysLeft, $merchant->getCompanyName() ?? 'ce commerce'),
+            'primary_value' => $contestTitle,
+            'primary_label' => 'Concours',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_label' => 'Commerçant',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'contest_title' => $contestTitle,
+            'contest_description' => $contestDescription,
+            'contest_start_at' => $startAt,
+            'contest_end_at' => $endAt,
+            'days_left' => $daysLeft,
         ]);
 
         return [

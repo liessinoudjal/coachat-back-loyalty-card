@@ -2,6 +2,7 @@
 
 namespace App\Service;
 
+use App\Entity\Contest;
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
@@ -228,6 +229,55 @@ class NotificationService
         );
     }
 
+    public function notifyContestDayBeforeStart(Customer $customer, Merchant $merchant, Contest $contest): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_DAY_BEFORE_START,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
+                'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+            ],
+        );
+    }
+
+    public function notifyContestStarts(Customer $customer, Merchant $merchant, Contest $contest): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_STARTS,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
+                'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+            ],
+        );
+    }
+
+    public function notifyContestEndingSoon(Customer $customer, Merchant $merchant, Contest $contest): bool
+    {
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_ENDING_SOON,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
+                'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'days_left' => 2,
+            ],
+        );
+    }
+
     public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): bool
     {
         if (!$this->isMandatoryNotificationType($type)) {
@@ -317,6 +367,9 @@ class NotificationService
             NotificationType::PROMOTIONAL_OFFER_ENDING_SOON => sprintf('Plus que 2 jours pour profiter du bon plan chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_BEFORE => sprintf('Demain chez %s : offre flash à ne pas manquer !', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF => sprintf("Aujourd'hui seulement chez %s : offre flash !", $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_DAY_BEFORE_START => sprintf('Demain, nouveau jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_STARTS => sprintf('Le jeu concours commence aujourd\'hui chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_ENDING_SOON => sprintf('Plus que 2 jours pour participer au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
     }
@@ -338,6 +391,14 @@ class NotificationService
             NotificationType::PROMOTIONAL_OFFER_FLASH_DAY_OF,
         ], true)) {
             return $preference->isPromotionalOffersEnabled();
+        }
+
+        if (in_array($type, [
+            NotificationType::CONTEST_DAY_BEFORE_START,
+            NotificationType::CONTEST_STARTS,
+            NotificationType::CONTEST_ENDING_SOON,
+        ], true)) {
+            return $preference->isContestNotificationsEnabled();
         }
 
         return $preference->isEnabled();

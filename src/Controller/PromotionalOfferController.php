@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Merchant;
 use App\Entity\PromotionalOffer;
 use App\Repository\PromotionalOfferRepository;
+use App\Service\ContestNotificationDispatcher;
 use App\Service\PromotionalOfferNotificationDispatcher;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -19,6 +20,7 @@ class PromotionalOfferController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly PromotionalOfferRepository $offerRepository,
         private readonly PromotionalOfferNotificationDispatcher $notificationDispatcher,
+        private readonly ContestNotificationDispatcher $contestNotificationDispatcher,
         private readonly LoggerInterface $logger,
         private readonly string $promotionalOffersCronToken,
         private readonly string $promotionalOffersCronBasicUser,
@@ -284,15 +286,18 @@ class PromotionalOfferController extends AbstractController
         ]);
 
         $result = $this->notificationDispatcher->dispatch($today);
+        $contestResult = $this->contestNotificationDispatcher->dispatch($today);
 
         $this->logger->info('promotional_offer.daily_dispatch.completed', [
             'date' => $today->format('Y-m-d'),
             'result' => $result,
+            'contest_result' => $contestResult,
         ]);
 
         return new JsonResponse([
             'date' => $today->format('Y-m-d'),
             ...$result,
+            ...$contestResult,
         ]);
     }
 
