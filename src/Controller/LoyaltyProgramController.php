@@ -139,30 +139,24 @@ class LoyaltyProgramController extends AbstractController
         }
 
         $data = json_decode($request->getContent(), true);
-        if (isset($data['name'])) {
-            $program->setName($data['name']);
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'Invalid payload'], 400);
         }
-        if (isset($data['description'])) {
-            $program->setDescription($data['description']);
+
+        // During update, only keep explicitly allowed fields.
+        $allowedFields = ['name', 'description', 'reward_description'];
+        $safeData = array_intersect_key($data, array_flip($allowedFields));
+
+        if (array_key_exists('name', $safeData)) {
+            $program->setName($safeData['name']);
         }
-        if (isset($data['type'])) {
-            $program->setType(LoyaltyProgramType::from($data['type']));
+        if (array_key_exists('description', $safeData)) {
+            $program->setDescription($safeData['description']);
         }
-        if (isset($data['points_per_euro'])) {
-            $program->setPointsPerEuro($data['points_per_euro']);
+        if (array_key_exists('reward_description', $safeData)) {
+            $program->setRewardDescription($safeData['reward_description']);
         }
-        if (isset($data['points_target'])) {
-            $program->setPointsTarget($data['points_target']);
-        }
-        if (isset($data['stamp_target'])) {
-            $program->setStampTarget($data['stamp_target']);
-        }
-        if (isset($data['reward_description'])) {
-            $program->setRewardDescription($data['reward_description']);
-        }
-        if (isset($data['is_active'])) {
-            $program->setIsActive($data['is_active']);
-        }
+
 
         $this->entityManager->flush();
 

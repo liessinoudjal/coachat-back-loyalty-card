@@ -1335,6 +1335,21 @@ Met à jour un programme de fidélité.
 **Headers :**
 - `Authorization: Bearer <token>`
 
+**Règles métier de mise à jour (anti-régression cartes existantes) :**
+- Champs autorisés : `name`, `description`, `reward_description`
+- Champs ignorés même s'ils sont envoyés : `type`, `stamp_target`, `points_target`, `points_per_euro`, `is_active`
+
+**Exemple body autorisé :**
+```json
+{
+  "name": "Programme Café Matin",
+  "description": "Valable du lundi au vendredi",
+  "reward_description": "1 boisson offerte"
+}
+```
+
+**Note :** cette restriction protège la cohérence des cartes déjà en cours ou complétées.
+
 ## Loyalty Cards (Cartes de Fidélité)
 
 ### Get Loyalty Cards
