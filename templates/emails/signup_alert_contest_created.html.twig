@@ -1,0 +1,55 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td style="padding:16px; border:1px solid #e5e7eb; background-color:#f9fafb; border-radius:14px;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:8px;">Description du concours</div>
+                <div style="font-size:15px; line-height:1.6; color:#111827; white-space:pre-line;">{{ contest_description }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td class="email-section-cell email-section-cell--left" style="width:50%; padding:0 8px 16px 0; vertical-align:top;">
+                <div style="border:1px solid #e5e7eb; border-radius:12px; padding:14px; background:#ffffff;">
+                    <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Début</div>
+                    <div style="font-size:14px; line-height:1.5; color:#111827;">{{ contest_start_at }}</div>
+                </div>
+            </td>
+            <td class="email-section-cell email-section-cell--right" style="width:50%; padding:0 0 16px 8px; vertical-align:top;">
+                <div style="border:1px solid #e5e7eb; border-radius:12px; padding:14px; background:#ffffff;">
+                    <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Fin</div>
+                    <div style="font-size:14px; line-height:1.5; color:#111827;">{{ contest_end_at }}</div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td style="padding:14px; border:1px solid #e5e7eb; background-color:#ffffff; border-radius:12px;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Date de tirage</div>
+                <div style="font-size:14px; line-height:1.5; color:#111827;">{{ contest_draw_at }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+        <tr>
+            <td style="padding:16px; border:1px solid #dbeafe; background-color:#eff6ff; border-radius:14px;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#1d4ed8; margin-bottom:10px;">Lots du concours</div>
+                {% if contest_rewards is not empty %}
+                    <ul style="margin:0; padding-left:18px; color:#1e3a8a; font-size:14px; line-height:1.7;">
+                        {% for reward in contest_rewards %}
+                            <li>{{ reward }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <div style="font-size:14px; line-height:1.6; color:#1e3a8a;">Aucun lot renseigné.</div>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+{% endblock %}

@@ -19,4 +19,6 @@ enum NotificationType: string
     case CONTEST_DAY_BEFORE_START = 'contest_day_before_start';
     case CONTEST_STARTS = 'contest_starts';
     case CONTEST_ENDING_SOON = 'contest_ending_soon';
+    case CONTEST_DRAW_DAY = 'contest_draw_day';
+    case CONTEST_PARTICIPATION_UPDATED = 'contest_participation_updated';
 }

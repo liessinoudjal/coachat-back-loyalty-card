@@ -14,7 +14,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(
     name: 'app:contests:dispatch',
-    description: 'Dispatch contest notifications (J-1, start day, D-2 before end).',
+    description: 'Dispatch contest notifications (J-1, start day, draw day, D-2 before end).',
 )]
 final class DispatchContestNotificationsCommand extends Command
 {
@@ -61,6 +61,7 @@ final class DispatchContestNotificationsCommand extends Command
                 ['day_before_notifications_sent_for_contests', (string) $result['day_before_notifications_sent_for_contests']],
                 ['start_notifications_sent_for_contests', (string) $result['start_notifications_sent_for_contests']],
                 ['ending_soon_notifications_sent_for_contests', (string) $result['ending_soon_notifications_sent_for_contests']],
+                ['draw_day_notifications_sent_for_contests', (string) $result['draw_day_notifications_sent_for_contests']],
             ],
         );
 

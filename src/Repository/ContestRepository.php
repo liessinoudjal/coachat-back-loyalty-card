@@ -23,12 +23,12 @@ class ContestRepository extends ServiceEntityRepository
     public function findByMerchantOrdered(Merchant $merchant): array
     {
         return $this->createQueryBuilder('contest')
+            ->distinct()
             ->addSelect('reward')
             ->leftJoin('contest.rewards', 'reward')
-            ->andWhere('contest.merchant = :merchant')
-            ->setParameter('merchant', $merchant)
+            ->andWhere('IDENTITY(contest.merchant) = :merchantId')
+            ->setParameter('merchantId', $merchant->getId(), 'uuid')
             ->orderBy('contest.startAt', 'DESC')
-            ->addOrderBy('reward.rank', 'ASC')
             ->getQuery()
             ->getResult();
     }
@@ -72,6 +72,21 @@ class ContestRepository extends ServiceEntityRepository
             ->andWhere('contest.startAt >= :fromInclusive')
             ->andWhere('contest.startAt < :toExclusive')
             ->andWhere('contest.dayBeforeNotificationSentAt IS NULL')
+            ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
+            ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * @return Contest[]
+     */
+    public function findDrawDayBetween(\DateTimeImmutable $fromInclusive, \DateTimeImmutable $toExclusive): array
+    {
+        return $this->createQueryBuilder('contest')
+            ->andWhere('contest.drawAt >= :fromInclusive')
+            ->andWhere('contest.drawAt < :toExclusive')
+            ->andWhere('contest.drawDayNotificationSentAt IS NULL')
             ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
             ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
             ->getQuery()

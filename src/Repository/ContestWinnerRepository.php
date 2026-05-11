@@ -35,9 +35,13 @@ class ContestWinnerRepository extends ServiceEntityRepository
     public function findByContest(Contest $contest): array
     {
         return $this->createQueryBuilder('cw')
+            ->addSelect('reward')
+            ->addSelect('customer')
+            ->leftJoin('cw.reward', 'reward')
+            ->leftJoin('cw.customer', 'customer')
             ->where('cw.contest = :contest')
             ->setParameter('contest', $contest)
-            ->orderBy('cw.reward.rank', 'ASC')
+            ->orderBy('reward.rank', 'ASC')
             ->addOrderBy('cw.createdAt', 'ASC')
             ->getQuery()
             ->getResult();
@@ -68,5 +72,23 @@ class ContestWinnerRepository extends ServiceEntityRepository
             ->setParameter('contest', $contest)
             ->getQuery()
             ->getSingleScalarResult();
+    }
+
+    /**
+     * @return int[]
+     */
+    public function findWinnerCustomerIds(Contest $contest): array
+    {
+        $rows = $this->createQueryBuilder('cw')
+            ->select('DISTINCT IDENTITY(cw.customer) AS customer_id')
+            ->where('cw.contest = :contest')
+            ->setParameter('contest', $contest)
+            ->getQuery()
+            ->getArrayResult();
+
+        return array_values(array_map(
+            static fn (array $row): int => (int) ($row['customer_id'] ?? 0),
+            array_filter($rows, static fn (array $row): bool => isset($row['customer_id'])),
+        ));
     }
 }

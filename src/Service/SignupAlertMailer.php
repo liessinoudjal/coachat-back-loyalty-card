@@ -278,35 +278,137 @@ class SignupAlertMailer
         $merchant = $contest->getMerchant();
         $merchantId = $merchant?->getId()?->toRfc4122() ?? 'n/a';
         $merchantName = $merchant?->getCompanyName() ?? 'n/a';
+        $contestTitle = $contest->getTitle() ?: 'n/a';
+        $contestDescription = $contest->getDescription() ?: 'n/a';
+        $contestStartAt = $contest->getStartAt()?->format(DATE_ATOM) ?? 'n/a';
+        $contestEndAt = $contest->getEndAt()?->format(DATE_ATOM) ?? 'n/a';
+        $contestDrawAt = $contest->getDrawAt()?->format(DATE_ATOM) ?? 'n/a';
+
+        $rewards = $contest->getRewards()->toArray();
+        usort(
+            $rewards,
+            static fn ($left, $right): int => $left->getRank() <=> $right->getRank(),
+        );
+
+        $rewardLines = array_map(
+            static fn ($reward): string => sprintf('%d. %s', $reward->getRank(), $reward->getTitle()),
+            $rewards,
+        );
+
+        $rewardListText = $rewardLines !== []
+            ? implode("\n", array_map(static fn (string $line): string => sprintf('- %s', $line), $rewardLines))
+            : '- Aucun lot renseigné';
 
         $this->sendMessage(
-            subject: sprintf('[Contest] Nouveau jeu concours créé: %s', $contest->getTitle() ?: 'n/a'),
+            subject: sprintf('[Contest] Nouveau jeu concours créé: %s', $contestTitle),
             textBody: implode("\n", [
                 'Un nouveau jeu concours vient d\'être créé.',
                 '',
                 sprintf('Contest ID: %s', $contestId),
-                sprintf('Titre: %s', $contest->getTitle() ?: 'n/a'),
-                sprintf('Description: %s', $contest->getDescription() ?: 'n/a'),
-                sprintf('Début: %s', $contest->getStartAt()?->format(DATE_ATOM) ?? 'n/a'),
-                sprintf('Fin: %s', $contest->getEndAt()?->format(DATE_ATOM) ?? 'n/a'),
-                sprintf('Tirage: %s', $contest->getDrawAt()?->format(DATE_ATOM) ?? 'n/a'),
+                sprintf('Titre: %s', $contestTitle),
+                sprintf('Description: %s', $contestDescription),
+                sprintf('Début: %s', $contestStartAt),
+                sprintf('Fin: %s', $contestEndAt),
+                sprintf('Tirage: %s', $contestDrawAt),
+                'Lots:',
+                $rewardListText,
                 sprintf('Merchant ID: %s', $merchantId),
                 sprintf('Merchant: %s', $merchantName),
             ]),
-            htmlBody: $this->twig->render('emails/signup_alert_base.html.twig', [
+            htmlBody: $this->twig->render('emails/signup_alert_contest_created.html.twig', [
                 'email_title' => 'Nouveau jeu concours créé',
                 'email_eyebrow' => 'Alerte concours',
                 'email_accent' => 'CONTEST',
-                'summary' => sprintf('Le concours "%s" a été créé pour le commerce "%s".', $contest->getTitle() ?: 'n/a', $merchantName),
-                'primary_value' => $contest->getTitle() ?: 'n/a',
+                'summary' => sprintf('Le concours "%s" a été créé pour le commerce "%s".', $contestTitle, $merchantName),
+                'primary_value' => $contestTitle,
                 'primary_label' => 'Concours',
                 'secondary_value' => $merchantName,
                 'secondary_label' => 'Merchant',
+                'contest_description' => $contestDescription,
+                'contest_start_at' => $contestStartAt,
+                'contest_end_at' => $contestEndAt,
+                'contest_draw_at' => $contestDrawAt,
+                'contest_rewards' => $rewardLines,
             ]),
             context: [
                 'event' => 'contest_created',
                 'contest_id' => $contestId,
                 'merchant_id' => $merchantId,
+            ],
+            logger: $this->merchantLogger,
+        );
+    }
+
+    /**
+     * @param array<int, array{service:string, message:string, technical_message?:string}> $errors
+     * @param array<string, int> $promotionalResult
+     * @param array<string, int> $contestResult
+     */
+    public function notifyDailyDispatchErrorReport(
+        \DateTimeImmutable $date,
+        array $errors,
+        array $promotionalResult,
+        array $contestResult,
+    ): void {
+        if ($errors === []) {
+            return;
+        }
+
+        $errorLines = array_map(function (array $error): string {
+            $serviceLabel = $this->getDispatchServiceLabel((string) ($error['service'] ?? ''));
+            $message = trim((string) ($error['message'] ?? ''));
+            if ($message === '') {
+                $message = 'Une anomalie a été détectée sur ce traitement.';
+            }
+
+            return sprintf('- %s : %s', $serviceLabel, $message);
+        }, $errors);
+
+        $promotionalSummary = sprintf(
+            'Bons plans envoyés : début=%d, fin proche=%d, flash J-1=%d, flash J=%d',
+            (int) ($promotionalResult['start_notifications_sent_for_offers'] ?? 0),
+            (int) ($promotionalResult['ending_soon_notifications_sent_for_offers'] ?? 0),
+            (int) ($promotionalResult['flash_day_before_notifications_sent_for_offers'] ?? 0),
+            (int) ($promotionalResult['flash_day_of_notifications_sent_for_offers'] ?? 0),
+        );
+
+        $contestSummary = sprintf(
+            'Concours envoyés : J-1=%d, début=%d, fin proche=%d, jour du tirage=%d',
+            (int) ($contestResult['day_before_notifications_sent_for_contests'] ?? 0),
+            (int) ($contestResult['start_notifications_sent_for_contests'] ?? 0),
+            (int) ($contestResult['ending_soon_notifications_sent_for_contests'] ?? 0),
+            (int) ($contestResult['draw_day_notifications_sent_for_contests'] ?? 0),
+        );
+
+        $this->sendMessage(
+            subject: sprintf('[Notifications quotidiennes] Anomalies détectées - %s', $date->format('Y-m-d')),
+            textBody: implode("\n", [
+                'Le traitement quotidien des notifications a rencontré des anomalies.',
+                '',
+                sprintf('Date : %s', $date->format('Y-m-d')),
+                $promotionalSummary,
+                $contestSummary,
+                '',
+                'Points à vérifier :',
+                ...$errorLines,
+            ]),
+            htmlBody: $this->twig->render('emails/signup_alert_base.html.twig', [
+                'email_title' => 'Anomalies sur les notifications quotidiennes',
+                'email_eyebrow' => 'Alerte suivi envois',
+                'email_accent' => 'NOTIFICATIONS',
+                'summary' => sprintf('Le traitement quotidien du %s a rencontré %d anomalie(s).', $date->format('Y-m-d'), count($errors)),
+                'primary_value' => (string) count($errors),
+                'primary_label' => 'Nombre d\'anomalies',
+                'secondary_value' => $date->format('Y-m-d'),
+                'secondary_label' => 'Date',
+            ]),
+            context: [
+                'event' => 'daily_dispatch_errors',
+                'date' => $date->format('Y-m-d'),
+                'error_count' => count($errors),
+                'promotional_result' => $promotionalResult,
+                'contest_result' => $contestResult,
+                'errors' => $errors,
             ],
             logger: $this->merchantLogger,
         );
@@ -340,5 +442,14 @@ class SignupAlertMailer
                 'subject' => $subject,
             ]);
         }
+    }
+
+    private function getDispatchServiceLabel(string $service): string
+    {
+        return match ($service) {
+            'promotional_offer_dispatcher' => 'Envoi des bons plans',
+            'contest_dispatcher' => 'Envoi des notifications concours',
+            default => 'Traitement des notifications',
+        };
     }
 }

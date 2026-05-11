@@ -15,6 +15,7 @@ use App\Enum\LoyaltyProgramType;
 use App\Enum\NotificationChannel;
 use App\Enum\NotificationLogStatus;
 use App\Enum\NotificationType;
+use App\Service\ContestParticipationService;
 use App\Repository\CustomerMerchantNotificationPreferenceRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -231,6 +232,14 @@ class NotificationService
 
     public function notifyContestDayBeforeStart(Customer $customer, Merchant $merchant, Contest $contest): bool
     {
+        $contestRewards = array_map(
+            static fn ($reward) => [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+            ],
+            $contest->getRewards()->toArray(),
+        );
+
         return $this->send(
             $merchant,
             $customer,
@@ -241,12 +250,23 @@ class NotificationService
                 'contest_description' => $contest->getDescription(),
                 'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
                 'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
+                'contest_rewards' => $contestRewards,
             ],
         );
     }
 
     public function notifyContestStarts(Customer $customer, Merchant $merchant, Contest $contest): bool
     {
+        $contestRewards = array_map(
+            static fn ($reward) => [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+            ],
+            $contest->getRewards()->toArray(),
+        );
+
         return $this->send(
             $merchant,
             $customer,
@@ -257,12 +277,23 @@ class NotificationService
                 'contest_description' => $contest->getDescription(),
                 'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
                 'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
+                'contest_rewards' => $contestRewards,
             ],
         );
     }
 
     public function notifyContestEndingSoon(Customer $customer, Merchant $merchant, Contest $contest): bool
     {
+        $contestRewards = array_map(
+            static fn ($reward) => [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+            ],
+            $contest->getRewards()->toArray(),
+        );
+
         return $this->send(
             $merchant,
             $customer,
@@ -273,7 +304,67 @@ class NotificationService
                 'contest_description' => $contest->getDescription(),
                 'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
                 'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
                 'days_left' => 2,
+                'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
+                'contest_rewards' => $contestRewards,
+            ],
+        );
+    }
+
+    public function notifyContestDrawDay(Customer $customer, Merchant $merchant, Contest $contest, int $participationCount): bool
+    {
+        $contestRewards = array_map(
+            static fn ($reward) => [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+            ],
+            $contest->getRewards()->toArray(),
+        );
+
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_DRAW_DAY,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
+                'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
+                'participation_count' => max(0, $participationCount),
+                'contest_rewards' => $contestRewards,
+            ],
+        );
+    }
+
+    public function notifyContestParticipationUpdated(Customer $customer, Merchant $merchant, Contest $contest, int $participationCount, int $participationLimit): bool
+    {
+        $contestRewards = array_map(
+            static fn ($reward) => [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+            ],
+            $contest->getRewards()->toArray(),
+        );
+
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_PARTICIPATION_UPDATED,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_start_at' => $contest->getStartAt()?->format(DATE_ATOM),
+                'contest_end_at' => $contest->getEndAt()?->format(DATE_ATOM),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                'contest_rewards' => $contestRewards,
+                'participation_count' => $participationCount,
+                'participation_limit' => $participationLimit,
+                'limit_reached' => $participationCount >= $participationLimit,
             ],
         );
     }
@@ -370,6 +461,8 @@ class NotificationService
             NotificationType::CONTEST_DAY_BEFORE_START => sprintf('Demain, nouveau jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::CONTEST_STARTS => sprintf('Le jeu concours commence aujourd\'hui chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::CONTEST_ENDING_SOON => sprintf('Plus que 2 jours pour participer au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_DRAW_DAY => sprintf('Tirage aujourd\'hui chez %s : bonne chance !', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_PARTICIPATION_UPDATED => sprintf('Votre participation au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
     }
@@ -397,6 +490,8 @@ class NotificationService
             NotificationType::CONTEST_DAY_BEFORE_START,
             NotificationType::CONTEST_STARTS,
             NotificationType::CONTEST_ENDING_SOON,
+            NotificationType::CONTEST_DRAW_DAY,
+            NotificationType::CONTEST_PARTICIPATION_UPDATED,
         ], true)) {
             return $preference->isContestNotificationsEnabled();
         }

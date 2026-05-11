@@ -41,11 +41,16 @@ class ContestParticipationServiceTest extends KernelTestCase
         $this->entityManager->close();
     }
 
+    private function uniqueEmail(string $prefix): string
+    {
+        return sprintf('%s-%s@example.com', $prefix, bin2hex(random_bytes(4)));
+    }
+
     public function testAutoEnrollsInActiveContests(): void
     {
         // Setup: Create merchant with active contest
         $user = new User();
-        $user->setEmail('merchant@example.com');
+        $user->setEmail($this->uniqueEmail('merchant'));
         $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
         $user->setRoles(['ROLE_MERCHANT']);
         $this->entityManager->persist($user);
@@ -67,7 +72,7 @@ class ContestParticipationServiceTest extends KernelTestCase
         // Create customer and card
         $customer = new Customer();
         $customer->setName('Test Customer');
-        $customer->setEmail('customer@example.com');
+        $customer->setEmail($this->uniqueEmail('customer'));
         $this->entityManager->persist($customer);
 
         $program = new LoyaltyProgram();
@@ -109,7 +114,7 @@ class ContestParticipationServiceTest extends KernelTestCase
     {
         // Setup: Customer already participating
         $user = new User();
-        $user->setEmail('merchant@example.com');
+        $user->setEmail($this->uniqueEmail('merchant'));
         $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
         $user->setRoles(['ROLE_MERCHANT']);
         $this->entityManager->persist($user);
@@ -130,15 +135,8 @@ class ContestParticipationServiceTest extends KernelTestCase
 
         $customer = new Customer();
         $customer->setName('Test Customer');
-        $customer->setEmail('customer@example.com');
+        $customer->setEmail($this->uniqueEmail('customer'));
         $this->entityManager->persist($customer);
-
-        // Existing participation
-        $existingParticipation = new ContestParticipation();
-        $existingParticipation->setContest($contest);
-        $existingParticipation->setCustomer($customer);
-        $existingParticipation->setIsWinningEntry(false);
-        $this->entityManager->persist($existingParticipation);
 
         $program = new LoyaltyProgram();
         $program->setMerchant($merchant);
@@ -165,22 +163,24 @@ class ContestParticipationServiceTest extends KernelTestCase
         $this->entityManager->persist($transaction);
         $this->entityManager->flush();
 
-        // Get count before
-        $countBefore = $this->participationRepository->countParticipations($contest);
+        for ($i = 0; $i < ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER; $i++) {
+            $this->service->autoEnrollInActiveContests($transaction);
+        }
 
-        // Execute auto-enroll
+        $countAtLimit = $this->participationRepository->countByContestAndCustomer($contest, $customer);
+        $this->assertSame(ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER, $countAtLimit);
+
         $this->service->autoEnrollInActiveContests($transaction);
 
-        // Verify: No new participation created
-        $countAfter = $this->participationRepository->countParticipations($contest);
-        $this->assertEquals($countBefore, $countAfter);
+        $countAfterExtraAttempt = $this->participationRepository->countByContestAndCustomer($contest, $customer);
+        $this->assertSame(ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER, $countAfterExtraAttempt);
     }
 
     public function testSkipsInactiveContests(): void
     {
         // Setup: Create inactive contest
         $user = new User();
-        $user->setEmail('merchant@example.com');
+        $user->setEmail($this->uniqueEmail('merchant'));
         $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
         $user->setRoles(['ROLE_MERCHANT']);
         $this->entityManager->persist($user);
@@ -201,7 +201,7 @@ class ContestParticipationServiceTest extends KernelTestCase
 
         $customer = new Customer();
         $customer->setName('Test Customer');
-        $customer->setEmail('customer@example.com');
+        $customer->setEmail($this->uniqueEmail('customer'));
         $this->entityManager->persist($customer);
 
         $program = new LoyaltyProgram();
@@ -233,14 +233,14 @@ class ContestParticipationServiceTest extends KernelTestCase
         $this->service->autoEnrollInActiveContests($transaction);
 
         // Verify: No participation created
-        $participation = $this->participationRepository->findByContestAndCustomer($inactiveContest, $customer);
-        $this->assertNull($participation);
+        $participationCount = $this->participationRepository->countByContestAndCustomer($inactiveContest, $customer);
+        $this->assertSame(0, $participationCount);
     }
 
     public function testIsParticipating(): void
     {
         $user = new User();
-        $user->setEmail('merchant@example.com');
+        $user->setEmail($this->uniqueEmail('merchant'));
         $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
         $user->setRoles(['ROLE_MERCHANT']);
         $this->entityManager->persist($user);
@@ -260,7 +260,7 @@ class ContestParticipationServiceTest extends KernelTestCase
 
         $customer = new Customer();
         $customer->setName('Test');
-        $customer->setEmail('test@example.com');
+        $customer->setEmail($this->uniqueEmail('customer'));
         $this->entityManager->persist($customer);
 
         $participation = new ContestParticipation();
@@ -275,10 +275,67 @@ class ContestParticipationServiceTest extends KernelTestCase
 
         $otherCustomer = new Customer();
         $otherCustomer->setName('Other');
-        $otherCustomer->setEmail('other@example.com');
+        $otherCustomer->setEmail($this->uniqueEmail('other'));
         $this->entityManager->persist($otherCustomer);
         $this->entityManager->flush();
 
         $this->assertFalse($this->service->isParticipating($otherCustomer, $contest));
+    }
+
+    public function testAutoEnrollAddsMultipleParticipationsUntilLimit(): void
+    {
+        $user = new User();
+        $user->setEmail($this->uniqueEmail('merchant'));
+        $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
+        $user->setRoles(['ROLE_MERCHANT']);
+        $this->entityManager->persist($user);
+
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Test Merchant');
+        $merchant->setUser($user);
+        $this->entityManager->persist($merchant);
+
+        $contest = new Contest();
+        $contest->setMerchant($merchant);
+        $contest->setTitle('Multi Participation Contest');
+        $contest->setStatus(ContestStatus::ACTIVE);
+        $contest->setStartAt(new \DateTimeImmutable('-1 day'));
+        $contest->setEndAt(new \DateTimeImmutable('+2 days'));
+        $this->entityManager->persist($contest);
+
+        $customer = new Customer();
+        $customer->setName('Customer');
+        $customer->setEmail($this->uniqueEmail('customer'));
+        $this->entityManager->persist($customer);
+
+        $program = new LoyaltyProgram();
+        $program->setMerchant($merchant);
+        $program->setName('Test Program');
+        $program->setType(LoyaltyProgramType::STAMP);
+        $program->setStampTarget(10);
+        $this->entityManager->persist($program);
+
+        $card = new LoyaltyCard();
+        $card->setMerchant($merchant);
+        $card->setCustomer($customer);
+        $card->setLoyaltyProgram($program);
+        $card->setWalletToken('wallet-' . uniqid());
+        $this->entityManager->persist($card);
+        $this->entityManager->flush();
+
+        for ($i = 0; $i < ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER + 2; $i++) {
+            $transaction = new Transaction();
+            $transaction->setMerchant($merchant);
+            $transaction->setLoyaltyCard($card);
+            $transaction->setPointsEarned(1);
+            $transaction->setPointsRedeemed(0);
+            $this->entityManager->persist($transaction);
+            $this->entityManager->flush();
+
+            $this->service->autoEnrollInActiveContests($transaction);
+        }
+
+        $participationCount = $this->participationRepository->countByContestAndCustomer($contest, $customer);
+        $this->assertSame(ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER, $participationCount);
     }
 }

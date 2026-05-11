@@ -5,6 +5,7 @@ namespace App\Service;
 use App\Entity\Contest;
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
+use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRepository;
 use App\Repository\CustomerMerchantNotificationPreferenceRepository;
@@ -26,7 +27,7 @@ class ContestNotificationDispatcher
     }
 
     /**
-     * @return array{day_before_notifications_sent_for_contests: int, start_notifications_sent_for_contests: int, ending_soon_notifications_sent_for_contests: int}
+        * @return array{day_before_notifications_sent_for_contests: int, start_notifications_sent_for_contests: int, ending_soon_notifications_sent_for_contests: int, draw_day_notifications_sent_for_contests: int}
      */
     public function dispatch(\DateTimeImmutable $today): array
     {
@@ -42,11 +43,14 @@ class ContestNotificationDispatcher
         $endingSoonEnd = $endingSoonStart->modify('+1 day');
         $endingSoonContests = $this->contestRepository->findEndingBetween($endingSoonStart, $endingSoonEnd);
 
+        $drawDayContests = $this->contestRepository->findDrawDayBetween($dayStart, $dayStart->modify('+1 day'));
+
         $this->logger->info('contest.dispatch.started', [
             'today' => $today->format('Y-m-d'),
             'day_before_count' => count($dayBeforeContests),
             'start_count' => count($startContests),
             'ending_soon_count' => count($endingSoonContests),
+            'draw_day_count' => count($drawDayContests),
         ]);
 
         $dayBeforeMarked = 0;
@@ -63,6 +67,7 @@ class ContestNotificationDispatcher
             $ok = $this->notifyForStart($contest);
             if ($ok) {
                 $contest->setStartNotificationSentAt(new \DateTimeImmutable());
+                $contest->setStatus(ContestStatus::ACTIVE);
                 $startMarked++;
             }
         }
@@ -76,6 +81,15 @@ class ContestNotificationDispatcher
             }
         }
 
+        $drawDayMarked = 0;
+        foreach ($drawDayContests as $contest) {
+            $ok = $this->notifyForDrawDay($contest);
+            if ($ok) {
+                $contest->setDrawDayNotificationSentAt(new \DateTimeImmutable());
+                $drawDayMarked++;
+            }
+        }
+
         $this->entityManager->flush();
 
         $this->logger->info('contest.dispatch.completed', [
@@ -83,12 +97,14 @@ class ContestNotificationDispatcher
             'day_before_notifications_sent_for_contests' => $dayBeforeMarked,
             'start_notifications_sent_for_contests' => $startMarked,
             'ending_soon_notifications_sent_for_contests' => $endingMarked,
+            'draw_day_notifications_sent_for_contests' => $drawDayMarked,
         ]);
 
         return [
             'day_before_notifications_sent_for_contests' => $dayBeforeMarked,
             'start_notifications_sent_for_contests' => $startMarked,
             'ending_soon_notifications_sent_for_contests' => $endingMarked,
+            'draw_day_notifications_sent_for_contests' => $drawDayMarked,
         ];
     }
 
@@ -99,9 +115,11 @@ class ContestNotificationDispatcher
      *   day_before_notifications_would_be_sent_for_contests: int,
      *   start_notifications_would_be_sent_for_contests: int,
      *   ending_soon_notifications_would_be_sent_for_contests: int,
+    *   draw_day_notifications_would_be_sent_for_contests: int,
      *   day_before_targeted_contests: int,
      *   start_targeted_contests: int,
-     *   ending_soon_targeted_contests: int
+    *   ending_soon_targeted_contests: int,
+    *   draw_day_targeted_contests: int
      * }
      */
     public function preview(\DateTimeImmutable $today): array
@@ -118,6 +136,8 @@ class ContestNotificationDispatcher
         $endingSoonEnd = $endingSoonStart->modify('+1 day');
         $endingSoonContests = $this->contestRepository->findEndingBetween($endingSoonStart, $endingSoonEnd);
 
+        $drawDayContests = $this->contestRepository->findDrawDayBetween($dayStart, $dayStart->modify('+1 day'));
+
         $dayBeforeWouldSend = 0;
         foreach ($dayBeforeContests as $contest) {
             $dayBeforeWouldSend += $this->countContestRecipients($contest);
@@ -133,13 +153,20 @@ class ContestNotificationDispatcher
             $endingSoonWouldSend += $this->countContestRecipients($contest);
         }
 
+        $drawDayWouldSend = 0;
+        foreach ($drawDayContests as $contest) {
+            $drawDayWouldSend += $this->countContestParticipantRecipients($contest);
+        }
+
         $result = [
             'day_before_notifications_would_be_sent_for_contests' => $dayBeforeWouldSend,
             'start_notifications_would_be_sent_for_contests' => $startWouldSend,
             'ending_soon_notifications_would_be_sent_for_contests' => $endingSoonWouldSend,
+            'draw_day_notifications_would_be_sent_for_contests' => $drawDayWouldSend,
             'day_before_targeted_contests' => count($dayBeforeContests),
             'start_targeted_contests' => count($startContests),
             'ending_soon_targeted_contests' => count($endingSoonContests),
+            'draw_day_targeted_contests' => count($drawDayContests),
         ];
 
         $this->logger->info('contest.dispatch.preview', [
@@ -189,6 +216,19 @@ class ContestNotificationDispatcher
         );
     }
 
+    private function notifyForDrawDay(Contest $contest): bool
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return false;
+        }
+
+        return $this->notifyContestParticipants(
+            $contest,
+            fn (Customer $customer, int $participationCount): bool => $this->notificationService->notifyContestDrawDay($customer, $merchant, $contest, $participationCount),
+        );
+    }
+
     /**
      * @param callable(Customer): bool $sendCallback
      */
@@ -222,6 +262,52 @@ class ContestNotificationDispatcher
         return !$hasFailure;
     }
 
+    /**
+     * @param callable(Customer, int): bool $sendCallback
+     */
+    private function notifyContestParticipants(Contest $contest, callable $sendCallback): bool
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return false;
+        }
+
+        $participantSummaryMap = [];
+        foreach ($this->participationRepository->getParticipantSummaries($contest) as $summary) {
+            $customerId = (int) ($summary['customer_id'] ?? 0);
+            if ($customerId <= 0) {
+                continue;
+            }
+
+            $participantSummaryMap[$customerId] = (int) ($summary['participation_count'] ?? 0);
+        }
+
+        if ($participantSummaryMap === []) {
+            return true;
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $hasFailure = false;
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId === null || !isset($participantSummaryMap[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $sent = $sendCallback($customer, $participantSummaryMap[$customerId]);
+            if (!$sent) {
+                $hasFailure = true;
+            }
+        }
+
+        return !$hasFailure;
+    }
+
     private function canReceiveContestNotification(Customer $customer, \App\Entity\Merchant $merchant): bool
     {
         $preference = $this->preferenceRepository->findOneByCustomerAndMerchant($customer, $merchant);
@@ -247,6 +333,37 @@ class ContestNotificationDispatcher
         foreach ($customers as $customer) {
             $customerId = $customer->getId();
             if ($customerId !== null && isset($participantIds[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private function countContestParticipantRecipients(Contest $contest): int
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return 0;
+        }
+
+        $participantIds = array_flip($this->participationRepository->findParticipantCustomerIds($contest));
+        if ($participantIds === []) {
+            return 0;
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $count = 0;
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId === null || !isset($participantIds[$customerId])) {
                 continue;
             }
 

@@ -7,11 +7,13 @@ use App\Entity\PromotionalOffer;
 use App\Repository\PromotionalOfferRepository;
 use App\Service\ContestNotificationDispatcher;
 use App\Service\PromotionalOfferNotificationDispatcher;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Annotation\Route;
 
 class PromotionalOfferController extends AbstractController
@@ -21,6 +23,8 @@ class PromotionalOfferController extends AbstractController
         private readonly PromotionalOfferRepository $offerRepository,
         private readonly PromotionalOfferNotificationDispatcher $notificationDispatcher,
         private readonly ContestNotificationDispatcher $contestNotificationDispatcher,
+        private readonly SignupAlertMailer $signupAlertMailer,
+        private readonly KernelInterface $kernel,
         private readonly LoggerInterface $logger,
         private readonly string $promotionalOffersCronToken,
         private readonly string $promotionalOffersCronBasicUser,
@@ -51,7 +55,7 @@ class PromotionalOfferController extends AbstractController
                 'resolved_actor_merchant_id' => $actorMerchant?->getId()?->toRfc4122(),
             ]);
 
-            return new JsonResponse(['error' => 'promotional_offers_restricted_to_owner'], 403);
+            return $this->apiError('promotional_offers_restricted_to_owner', 403);
         }
 
         $today = new \DateTimeImmutable('today');
@@ -118,12 +122,12 @@ class PromotionalOfferController extends AbstractController
 
         $merchant = $this->resolveMerchantOwner();
         if (!$merchant instanceof Merchant) {
-            return new JsonResponse(['error' => 'promotional_offers_restricted_to_owner'], 403);
+            return $this->apiError('promotional_offers_restricted_to_owner', 403);
         }
 
         $payload = json_decode($request->getContent(), true);
         if (!is_array($payload)) {
-            return new JsonResponse(['error' => 'payload_invalid'], 400);
+            return $this->apiError('payload_invalid', 400);
         }
 
         $title = trim((string) ($payload['title'] ?? ''));
@@ -133,7 +137,7 @@ class PromotionalOfferController extends AbstractController
 
         $validationError = $this->validatePayload($title, $description, $startsOn, $endsOn);
         if ($validationError !== null) {
-            return new JsonResponse(['error' => $validationError], 422);
+            return $this->apiError($validationError, 422);
         }
 
         $offer = (new PromotionalOffer())
@@ -156,22 +160,22 @@ class PromotionalOfferController extends AbstractController
 
         $merchant = $this->resolveMerchantOwner();
         if (!$merchant instanceof Merchant) {
-            return new JsonResponse(['error' => 'promotional_offers_restricted_to_owner'], 403);
+            return $this->apiError('promotional_offers_restricted_to_owner', 403);
         }
 
         $offer = $this->offerRepository->find($id);
         if (!$offer instanceof PromotionalOffer || $offer->getMerchant() !== $merchant) {
-            return new JsonResponse(['error' => 'promotional_offer_not_found'], 404);
+            return $this->apiError('promotional_offer_not_found', 404);
         }
 
         $today = new \DateTimeImmutable('today');
         if (!$this->isEditable($offer, $today)) {
-            return new JsonResponse(['error' => 'promotional_offer_not_editable_after_start_date'], 409);
+            return $this->apiError('promotional_offer_not_editable_after_start_date', 409);
         }
 
         $payload = json_decode($request->getContent(), true);
         if (!is_array($payload)) {
-            return new JsonResponse(['error' => 'payload_invalid'], 400);
+            return $this->apiError('payload_invalid', 400);
         }
 
         $title = trim((string) ($payload['title'] ?? ''));
@@ -181,7 +185,7 @@ class PromotionalOfferController extends AbstractController
 
         $validationError = $this->validatePayload($title, $description, $startsOn, $endsOn);
         if ($validationError !== null) {
-            return new JsonResponse(['error' => $validationError], 422);
+            return $this->apiError($validationError, 422);
         }
 
         $offer
@@ -202,17 +206,17 @@ class PromotionalOfferController extends AbstractController
 
         $merchant = $this->resolveMerchantOwner();
         if (!$merchant instanceof Merchant) {
-            return new JsonResponse(['error' => 'promotional_offers_restricted_to_owner'], 403);
+            return $this->apiError('promotional_offers_restricted_to_owner', 403);
         }
 
         $offer = $this->offerRepository->find($id);
         if (!$offer instanceof PromotionalOffer || $offer->getMerchant() !== $merchant) {
-            return new JsonResponse(['error' => 'promotional_offer_not_found'], 404);
+            return $this->apiError('promotional_offer_not_found', 404);
         }
 
         $today = new \DateTimeImmutable('today');
         if (!$this->isEditable($offer, $today)) {
-            return new JsonResponse(['error' => 'promotional_offer_not_deletable_after_start_date'], 409);
+            return $this->apiError('promotional_offer_not_deletable_after_start_date', 409);
         }
 
         $this->entityManager->remove($offer);
@@ -250,7 +254,7 @@ class PromotionalOfferController extends AbstractController
         if ($expectedToken === '') {
             $this->logger->error('promotional_offer.daily_dispatch.misconfigured_token');
 
-            return new JsonResponse(['error' => 'promotional_offer_cron_token_not_configured'], 503);
+            return $this->apiError('promotional_offer_cron_token_not_configured', 503);
         }
 
         if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
@@ -258,7 +262,7 @@ class PromotionalOfferController extends AbstractController
                 'provided_token_length' => strlen($providedToken),
             ]);
 
-            return new JsonResponse(['error' => 'unauthorized'], 401);
+            return $this->apiError('unauthorized', 401);
         }
 
         if (!$this->isBasicAuthValid($request)) {
@@ -266,7 +270,7 @@ class PromotionalOfferController extends AbstractController
                 'provided_basic_user' => $request->getUser(),
             ]);
 
-            return new JsonResponse(['error' => 'unauthorized_basic_auth'], 401);
+            return $this->apiError('unauthorized_basic_auth', 401);
         }
 
         if (!$this->isCustomHeaderValid($request)) {
@@ -277,7 +281,7 @@ class PromotionalOfferController extends AbstractController
                     : false,
             ]);
 
-            return new JsonResponse(['error' => 'unauthorized_custom_header'], 401);
+            return $this->apiError('unauthorized_custom_header', 401);
         }
 
         $today = new \DateTimeImmutable('today');
@@ -285,20 +289,143 @@ class PromotionalOfferController extends AbstractController
             'date' => $today->format('Y-m-d'),
         ]);
 
-        $result = $this->notificationDispatcher->dispatch($today);
-        $contestResult = $this->contestNotificationDispatcher->dispatch($today);
+        $result = [
+            'start_notifications_sent_for_offers' => 0,
+            'ending_soon_notifications_sent_for_offers' => 0,
+            'flash_day_before_notifications_sent_for_offers' => 0,
+            'flash_day_of_notifications_sent_for_offers' => 0,
+        ];
+        $contestResult = [
+            'day_before_notifications_sent_for_contests' => 0,
+            'start_notifications_sent_for_contests' => 0,
+            'ending_soon_notifications_sent_for_contests' => 0,
+            'draw_day_notifications_sent_for_contests' => 0,
+        ];
+        $errors = [];
+
+        try {
+            $result = $this->notificationDispatcher->dispatch($today);
+        } catch (\Throwable $exception) {
+            $errors[] = [
+                'service' => 'promotional_offer_dispatcher',
+                'message' => 'Les notifications des bons plans n\'ont pas pu être envoyées complètement.',
+                'technical_message' => $exception->getMessage(),
+            ];
+
+            $this->logger->error('promotional_offer.daily_dispatch.promotional_dispatcher_failed', [
+                'date' => $today->format('Y-m-d'),
+                'exception' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ]);
+        }
+
+        try {
+            $contestResult = $this->contestNotificationDispatcher->dispatch($today);
+        } catch (\Throwable $exception) {
+            $errors[] = [
+                'service' => 'contest_dispatcher',
+                'message' => 'Les notifications concours prévues aujourd\'hui n\'ont pas pu être envoyées complètement.',
+                'technical_message' => $exception->getMessage(),
+            ];
+
+            $this->logger->error('promotional_offer.daily_dispatch.contest_dispatcher_failed', [
+                'date' => $today->format('Y-m-d'),
+                'exception' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ]);
+        }
+
+        if ($errors !== []) {
+            $this->signupAlertMailer->notifyDailyDispatchErrorReport(
+                $today,
+                $errors,
+                $result,
+                $contestResult,
+            );
+        }
 
         $this->logger->info('promotional_offer.daily_dispatch.completed', [
             'date' => $today->format('Y-m-d'),
             'result' => $result,
             'contest_result' => $contestResult,
+            'errors' => $errors,
         ]);
 
         return new JsonResponse([
             'date' => $today->format('Y-m-d'),
             ...$result,
             ...$contestResult,
-        ]);
+            'errors' => $errors,
+        ], $errors === [] ? 200 : 207);
+    }
+
+    #[Route('/api/promotional-offers/daily-dispatch/simulate-error-report', name: 'promotional_offer_daily_dispatch_simulate_error_report', methods: ['POST'])]
+    public function simulateDailyDispatchErrorReport(Request $request): JsonResponse
+    {
+        if ($this->kernel->getEnvironment() !== 'dev') {
+            return $this->apiError('not_found', 404);
+        }
+
+        $body = json_decode($request->getContent(), true);
+        if (!is_array($body)) {
+            $body = [];
+        }
+
+        $providedToken = trim((string) (
+            $request->headers->get('X-Cron-Token')
+            ?? $request->query->get('token')
+            ?? ($body['token'] ?? '')
+        ));
+        $expectedToken = trim($this->promotionalOffersCronToken);
+
+        if ($expectedToken === '' || $providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
+            return $this->apiError('unauthorized', 401);
+        }
+
+        if (!$this->isBasicAuthValid($request)) {
+            return $this->apiError('unauthorized_basic_auth', 401);
+        }
+
+        if (!$this->isCustomHeaderValid($request)) {
+            return $this->apiError('unauthorized_custom_header', 401);
+        }
+
+        $today = new \DateTimeImmutable('today');
+        $errors = [
+            [
+                'service' => 'promotional_offer_dispatcher',
+                'message' => 'Simulation: les notifications des bons plans n\'ont pas pu être envoyées complètement.',
+                'technical_message' => 'Simulated promotional dispatcher failure (dev).',
+            ],
+            [
+                'service' => 'contest_dispatcher',
+                'message' => 'Simulation: les notifications concours prévues aujourd\'hui n\'ont pas pu être envoyées complètement.',
+                'technical_message' => 'Simulated contest dispatcher failure (dev).',
+            ],
+        ];
+
+        $promotionalResult = [
+            'start_notifications_sent_for_offers' => 0,
+            'ending_soon_notifications_sent_for_offers' => 0,
+            'flash_day_before_notifications_sent_for_offers' => 0,
+            'flash_day_of_notifications_sent_for_offers' => 0,
+        ];
+        $contestResult = [
+            'day_before_notifications_sent_for_contests' => 0,
+            'start_notifications_sent_for_contests' => 0,
+            'ending_soon_notifications_sent_for_contests' => 0,
+            'draw_day_notifications_sent_for_contests' => 0,
+        ];
+
+        $this->signupAlertMailer->notifyDailyDispatchErrorReport($today, $errors, $promotionalResult, $contestResult);
+
+        return new JsonResponse([
+            'status' => 'simulated_report_sent',
+            'date' => $today->format('Y-m-d'),
+            'errors' => $errors,
+        ], 202);
     }
 
     private function parseDate(mixed $value): ?\DateTimeImmutable
@@ -491,5 +618,38 @@ class PromotionalOfferController extends AbstractController
         }
 
         return $user->getCustomer()?->getStaffMerchant();
+    }
+
+    private function apiError(string $code, int $status): JsonResponse
+    {
+        return new JsonResponse([
+            'error' => $code,
+            'message' => $this->mapErrorMessage($code),
+        ], $status);
+    }
+
+    private function mapErrorMessage(string $code): string
+    {
+        return match ($code) {
+            'promotional_offers_restricted_to_owner' => 'Seul le compte propriétaire peut gérer les bons plans.',
+            'payload_invalid' => 'Les informations envoyées sont incomplètes ou invalides.',
+            'promotional_offer_not_found' => 'Ce bon plan est introuvable.',
+            'promotional_offer_not_editable_after_start_date' => 'Ce bon plan ne peut plus être modifié après sa date de début.',
+            'promotional_offer_not_deletable_after_start_date' => 'Ce bon plan ne peut plus être supprimé après sa date de début.',
+            'promotional_offer_cron_token_not_configured' => 'Le traitement automatique des notifications n\'est pas configuré.',
+            'unauthorized' => 'Accès non autorisé.',
+            'unauthorized_basic_auth' => 'Accès refusé: identifiants de sécurité invalides.',
+            'unauthorized_custom_header' => 'Accès refusé: en-tête de sécurité invalide.',
+            'not_found' => 'Cette ressource est introuvable.',
+            'title_required' => 'Le titre du bon plan est obligatoire.',
+            'title_too_long' => 'Le titre du bon plan est trop long.',
+            'description_required' => 'La description du bon plan est obligatoire.',
+            'starts_on_invalid' => 'La date de début du bon plan est invalide.',
+            'ends_on_invalid' => 'La date de fin du bon plan est invalide.',
+            'starts_on_must_be_j_plus_1' => 'La date de début du bon plan doit être au minimum demain.',
+            'ends_on_must_be_j_plus_1' => 'La date de fin du bon plan doit être au minimum demain.',
+            'date_range_invalid' => 'La date de fin du bon plan doit être postérieure ou égale à la date de début.',
+            default => 'Une anomalie est survenue. Merci de réessayer.',
+        };
     }
 }

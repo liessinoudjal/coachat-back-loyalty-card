@@ -5,7 +5,6 @@ namespace App\Service;
 use App\Entity\Contest;
 use App\Entity\ContestParticipation;
 use App\Entity\Customer;
-use App\Entity\Merchant;
 use App\Entity\Transaction;
 use App\Repository\ContestRepository;
 use App\Repository\ContestParticipationRepository;
@@ -13,10 +12,13 @@ use Doctrine\ORM\EntityManagerInterface;
 
 class ContestParticipationService
 {
+    public const MAX_PARTICIPATIONS_PER_CUSTOMER = 10;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly ContestRepository $contestRepository,
         private readonly ContestParticipationRepository $participationRepository,
+        private readonly NotificationService $notificationService,
     ) {
     }
 
@@ -41,26 +43,45 @@ class ContestParticipationService
             ->createQueryBuilder('c')
             ->where('c.merchant = :merchant')
             ->andWhere('c.startAt <= :now')
-            ->andWhere('c.endAt > :now')
+            ->andWhere('c.endAt >= :now')
             ->setParameter('merchant', $merchant)
             ->setParameter('now', $now)
             ->getQuery()
             ->getResult();
 
-        // For each active contest, create participation if not already participating
+        $notifications = [];
+
+        // For each active contest, create participation while the customer has not reached the limit
         foreach ($activeContests as $contest) {
-            $existingParticipation = $this->participationRepository->findByContestAndCustomer($contest, $customer);
-            if ($existingParticipation === null) {
-                $participation = new ContestParticipation();
-                $participation->setContest($contest);
-                $participation->setCustomer($customer);
-                $participation->setTransaction($transaction);
-                $participation->setIsWinningEntry(false);
-                $this->entityManager->persist($participation);
+            $currentCount = $this->participationRepository->countByContestAndCustomer($contest, $customer);
+            if ($currentCount >= self::MAX_PARTICIPATIONS_PER_CUSTOMER) {
+                continue;
             }
+
+            $participation = new ContestParticipation();
+            $participation->setContest($contest);
+            $participation->setCustomer($customer);
+            $participation->setTransaction($transaction);
+            $participation->setIsWinningEntry(false);
+            $this->entityManager->persist($participation);
+
+            $notifications[] = [
+                'contest' => $contest,
+                'count' => $currentCount + 1,
+            ];
         }
 
         $this->entityManager->flush();
+
+        foreach ($notifications as $notification) {
+            $this->notificationService->notifyContestParticipationUpdated(
+                $customer,
+                $merchant,
+                $notification['contest'],
+                $notification['count'],
+                self::MAX_PARTICIPATIONS_PER_CUSTOMER,
+            );
+        }
     }
 
     /**
@@ -68,15 +89,7 @@ class ContestParticipationService
      */
     public function getCustomerParticipationCount(Customer $customer, Contest $contest): int
     {
-        return $this->participationRepository
-            ->createQueryBuilder('cp')
-            ->select('COUNT(cp)')
-            ->where('cp.customer = :customer')
-            ->andWhere('cp.contest = :contest')
-            ->setParameter('customer', $customer)
-            ->setParameter('contest', $contest)
-            ->getQuery()
-            ->getSingleScalarResult();
+        return $this->participationRepository->countByContestAndCustomer($contest, $customer);
     }
 
     /**
@@ -84,6 +97,6 @@ class ContestParticipationService
      */
     public function isParticipating(Customer $customer, Contest $contest): bool
     {
-        return $this->participationRepository->findByContestAndCustomer($contest, $customer) !== null;
+        return $this->getCustomerParticipationCount($customer, $contest) > 0;
     }
 }

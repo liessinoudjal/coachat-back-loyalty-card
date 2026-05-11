@@ -48,8 +48,11 @@ class Contest
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $dayBeforeNotificationSentAt = null;
 
+    #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $drawDayNotificationSentAt = null;
+
     #[ORM\Column(enumType: ContestStatus::class, length: 32)]
-    private ContestStatus $status = ContestStatus::DRAFT;
+    private ContestStatus $status = ContestStatus::SCHEDULED;
 
     #[ORM\OneToMany(mappedBy: 'contest', targetEntity: ContestReward::class, cascade: ['persist', 'remove'], orphanRemoval: true)]
     #[ORM\OrderBy(['rank' => 'ASC'])]
@@ -176,6 +179,18 @@ class Contest
     public function setDayBeforeNotificationSentAt(?\DateTimeImmutable $dayBeforeNotificationSentAt): self
     {
         $this->dayBeforeNotificationSentAt = $dayBeforeNotificationSentAt;
+
+        return $this;
+    }
+
+    public function getDrawDayNotificationSentAt(): ?\DateTimeImmutable
+    {
+        return $this->drawDayNotificationSentAt;
+    }
+
+    public function setDrawDayNotificationSentAt(?\DateTimeImmutable $drawDayNotificationSentAt): self
+    {
+        $this->drawDayNotificationSentAt = $drawDayNotificationSentAt;
 
         return $this;
     }

@@ -57,25 +57,22 @@ final class ApplicationErrorLoggerSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $subject = sprintf('[ERREUR] %s — %s', $throwable::class, mb_substr($throwable->getMessage(), 0, 120));
+        $subject = '[Alerte plateforme] Incident côté application';
+
+        $incidentSummary = trim((string) mb_substr($throwable->getMessage(), 0, 180));
+        if ($incidentSummary === '') {
+            $incidentSummary = 'Un incident est survenu sans message détaillé.';
+        }
 
         $body = implode("\n", [
-            'Une exception non gérée a été détectée sur le serveur.',
+            'Une anomalie a été détectée sur la plateforme et peut impacter un parcours client ou marchand.',
             '',
-            sprintf('Type      : %s', $throwable::class),
-            sprintf('Message   : %s', $throwable->getMessage()),
-            sprintf('Fichier   : %s', $throwable->getFile()),
-            sprintf('Ligne     : %d', $throwable->getLine()),
-            sprintf('Code HTTP : %s', $throwable instanceof HttpExceptionInterface ? $throwable->getStatusCode() : 'n/a'),
+            sprintf('Parcours concerné : %s', $request->attributes->get('_route') ?? $request->getUri()),
+            sprintf('Niveau d\'impact : %s', $throwable instanceof HttpExceptionInterface && $throwable->getStatusCode() < 500 ? 'modéré' : 'élevé'),
+            sprintf('Résumé : %s', $incidentSummary),
+            sprintf('Identifiant de suivi : %s', $request->headers->get('X-Request-Id') ?? 'n/a'),
             '',
-            sprintf('Méthode   : %s', $request->getMethod()),
-            sprintf('URI       : %s', $request->getUri()),
-            sprintf('Route     : %s', $request->attributes->get('_route') ?? 'n/a'),
-            sprintf('IP client : %s', $request->getClientIp() ?? 'n/a'),
-            sprintf('Request-Id: %s', $request->headers->get('X-Request-Id') ?? 'n/a'),
-            '',
-            'Stack trace :',
-            $throwable->getTraceAsString(),
+            'Action recommandée : consulter les logs applicatifs pour le détail technique et corriger rapidement.',
         ]);
 
         $this->sendAlert($subject, $body);
@@ -98,20 +95,21 @@ final class ApplicationErrorLoggerSubscriber implements EventSubscriberInterface
             'trace' => $throwable->getTraceAsString(),
         ]);
 
-        $subject = sprintf('[ERREUR CONSOLE] %s — %s', $throwable::class, mb_substr($throwable->getMessage(), 0, 120));
+        $subject = '[Alerte plateforme] Incident sur une tâche automatique';
+
+        $incidentSummary = trim((string) mb_substr($throwable->getMessage(), 0, 180));
+        if ($incidentSummary === '') {
+            $incidentSummary = 'Une tâche a échoué sans message détaillé.';
+        }
 
         $body = implode("\n", [
-            'Une exception non gérée a été détectée lors d\'une commande console.',
+            'Une anomalie a été détectée pendant l\'exécution d\'une tâche automatique.',
             '',
-            sprintf('Type      : %s', $throwable::class),
-            sprintf('Message   : %s', $throwable->getMessage()),
-            sprintf('Fichier   : %s', $throwable->getFile()),
-            sprintf('Ligne     : %d', $throwable->getLine()),
-            sprintf('Commande  : %s', $command?->getName() ?? 'n/a'),
-            sprintf('Input     : %s', method_exists($input, '__toString') ? (string) $input : 'n/a'),
+            sprintf('Tâche concernée : %s', $command?->getName() ?? 'n/a'),
+            sprintf('Résumé : %s', $incidentSummary),
+            sprintf('Contexte d\'exécution : %s', method_exists($input, '__toString') ? (string) $input : 'n/a'),
             '',
-            'Stack trace :',
-            $throwable->getTraceAsString(),
+            'Action recommandée : relancer la tâche après vérification des logs applicatifs.',
         ]);
 
         $this->sendAlert($subject, $body);

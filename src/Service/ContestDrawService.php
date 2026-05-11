@@ -6,6 +6,7 @@ use App\Entity\Contest;
 use App\Entity\ContestParticipation;
 use App\Entity\ContestReward;
 use App\Entity\ContestWinner;
+use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRewardRepository;
 use App\Repository\ContestWinnerRepository;
@@ -23,61 +24,106 @@ class ContestDrawService
     }
 
     /**
-     * Execute draw for a contest, selecting winners for each reward
+     * Execute draw for a contest, selecting winners for each reward.
      *
      * @return ContestWinner[]
-     *
-     * @throws \InvalidArgumentException if not enough participations
      */
     public function executeDraw(Contest $contest): array
     {
-        // Get rewards ordered by rank
-        $rewards = $this->rewardRepository->findByContestOrderedByRank($contest);
+        $winners = [];
 
-        if (empty($rewards)) {
-            throw new \InvalidArgumentException('Contest has no rewards to distribute.');
+        while (($winner = $this->drawNextReward($contest)) instanceof ContestWinner) {
+            $winners[] = $winner;
         }
 
-        // Get eligible participations (not yet marked as winning)
+        return $winners;
+    }
+
+    public function drawNextReward(Contest $contest): ?ContestWinner
+    {
+        $reward = $this->findNextReward($contest);
+        if (!$reward instanceof ContestReward) {
+            $contest->setStatus(ContestStatus::FINISHED);
+            $this->entityManager->flush();
+
+            return null;
+        }
+
         $eligibleParticipations = $this->participationRepository->findEligibleForDraw($contest);
 
         if (empty($eligibleParticipations)) {
             throw new \InvalidArgumentException('No eligible participants for draw.');
         }
 
-        $winners = [];
+        $randomIndex = \random_int(0, \count($eligibleParticipations) - 1);
+        $selectedParticipation = $eligibleParticipations[$randomIndex];
+        $selectedParticipation->setIsWinningEntry(true);
 
-        // For each reward, select a random winner
-        foreach ($rewards as $reward) {
-            if (empty($eligibleParticipations)) {
-                break; // No more participants to select
-            }
+        $winner = new ContestWinner();
+        $winner->setContest($contest);
+        $winner->setCustomer($selectedParticipation->getCustomer());
+        $winner->setReward($reward);
+        $winner->setQrCodeToken($this->generateQrToken());
 
-            // Select random index
-            $randomIndex = \random_int(0, \count($eligibleParticipations) - 1);
-            $selectedParticipation = $eligibleParticipations[$randomIndex];
+        $this->entityManager->persist($winner);
 
-            // Mark as winning entry
-            $selectedParticipation->setIsWinningEntry(true);
-
-            // Create winner record with unique QR token
-            $winner = new ContestWinner();
-            $winner->setContest($contest);
-            $winner->setCustomer($selectedParticipation->getCustomer());
-            $winner->setReward($reward);
-            $winner->setQrCodeToken($this->generateQrToken());
-
-            $this->entityManager->persist($winner);
-            $winners[] = $winner;
-
-            // Remove from eligible pool (one win per draw session per customer)
-            unset($eligibleParticipations[$randomIndex]);
-            $eligibleParticipations = \array_values($eligibleParticipations); // Reindex array
+        if ($this->findNextReward($contest, $reward) === null) {
+            $contest->setStatus(ContestStatus::FINISHED);
         }
 
         $this->entityManager->flush();
 
-        return $winners;
+        return $winner;
+    }
+
+    /**
+     * @return ContestReward[]
+     */
+    public function getRemainingRewards(Contest $contest): array
+    {
+        $rewards = $this->rewardRepository->findByContestOrderedByRank($contest);
+        if (empty($rewards)) {
+            return [];
+        }
+
+        $assignedRewardIds = array_map(
+            static fn (ContestWinner $winner): ?int => $winner->getReward()?->getId(),
+            $this->winnerRepository->findByContest($contest),
+        );
+        $assignedRewardIds = array_values(array_filter($assignedRewardIds, static fn (?int $id): bool => $id !== null));
+
+        return array_values(array_filter(
+            $rewards,
+            static fn (ContestReward $reward): bool => !in_array($reward->getId(), $assignedRewardIds, true),
+        ));
+    }
+
+    private function findNextReward(Contest $contest, ?ContestReward $currentReward = null): ?ContestReward
+    {
+        $rewards = $this->rewardRepository->findByContestOrderedByRank($contest);
+
+        if (empty($rewards)) {
+            throw new \InvalidArgumentException('Contest has no rewards to distribute.');
+        }
+
+        $assignedRewardIds = array_map(
+            static fn (ContestWinner $winner): ?int => $winner->getReward()?->getId(),
+            $this->winnerRepository->findByContest($contest),
+        );
+        $assignedRewardIds = array_values(array_filter($assignedRewardIds, static fn (?int $id): bool => $id !== null));
+
+        foreach ($rewards as $reward) {
+            if ($currentReward instanceof ContestReward && $reward->getId() === $currentReward->getId()) {
+                $assignedRewardIds[] = $reward->getId();
+                continue;
+            }
+
+            if (!in_array($reward->getId(), $assignedRewardIds, true)) {
+                return $reward;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -108,6 +154,8 @@ class ContestDrawService
         foreach ($winners as $winner) {
             $this->entityManager->remove($winner);
         }
+
+        $contest->setStatus(ContestStatus::ACTIVE);
 
         $this->entityManager->flush();
     }

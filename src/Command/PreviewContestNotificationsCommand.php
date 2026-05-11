@@ -61,9 +61,11 @@ final class PreviewContestNotificationsCommand extends Command
                 ['day_before_targeted_contests', (string) $result['day_before_targeted_contests']],
                 ['start_targeted_contests', (string) $result['start_targeted_contests']],
                 ['ending_soon_targeted_contests', (string) $result['ending_soon_targeted_contests']],
+                ['draw_day_targeted_contests', (string) $result['draw_day_targeted_contests']],
                 ['day_before_notifications_would_be_sent_for_contests', (string) $result['day_before_notifications_would_be_sent_for_contests']],
                 ['start_notifications_would_be_sent_for_contests', (string) $result['start_notifications_would_be_sent_for_contests']],
                 ['ending_soon_notifications_would_be_sent_for_contests', (string) $result['ending_soon_notifications_would_be_sent_for_contests']],
+                ['draw_day_notifications_would_be_sent_for_contests', (string) $result['draw_day_notifications_would_be_sent_for_contests']],
             ],
         );
 

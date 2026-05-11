@@ -5,12 +5,14 @@ namespace App\Controller;
 use App\Entity\Contest;
 use App\Entity\ContestParticipation;
 use App\Entity\ContestReward;
+use App\Entity\ContestWinner;
 use App\Entity\Merchant;
 use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRepository;
 use App\Repository\ContestWinnerRepository;
 use App\Service\ContestDrawService;
+use App\Service\ContestParticipationService;
 use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -89,7 +91,7 @@ class MerchantContestController extends AbstractController
         }
 
         $contest = $this->contestRepository->find($id);
-        if (!$contest instanceof Contest || $contest->getMerchant() !== $merchant) {
+        if (!$contest instanceof Contest || !$this->isContestOwnedByMerchant($contest, $merchant)) {
             return new JsonResponse(['error' => 'contest_not_found'], 404);
         }
 
@@ -107,7 +109,7 @@ class MerchantContestController extends AbstractController
         }
 
         $contest = $this->contestRepository->find($id);
-        if (!$contest instanceof Contest || $contest->getMerchant() !== $merchant) {
+        if (!$contest instanceof Contest || !$this->isContestOwnedByMerchant($contest, $merchant)) {
             return new JsonResponse(['error' => 'contest_not_found'], 404);
         }
 
@@ -130,6 +132,31 @@ class MerchantContestController extends AbstractController
         return new JsonResponse($this->formatContest($contest));
     }
 
+    #[Route('/api/merchants/me/contests/{id}', name: 'merchant_contest_delete', methods: ['DELETE'])]
+    public function delete(string $id): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $contest = $this->contestRepository->find($id);
+        if (!$contest instanceof Contest || !$this->isContestOwnedByMerchant($contest, $merchant)) {
+            return new JsonResponse(['error' => 'contest_not_found'], 404);
+        }
+
+        if (!$this->canDeleteContest($contest)) {
+            return new JsonResponse(['error' => 'contest_delete_locked'], 409);
+        }
+
+        $this->entityManager->remove($contest);
+        $this->entityManager->flush();
+
+        return new JsonResponse(null, 204);
+    }
+
     #[Route('/api/merchants/me/contests/{id}/clone', name: 'merchant_contest_clone', methods: ['POST'])]
     public function cloneContest(string $id): JsonResponse
     {
@@ -141,20 +168,24 @@ class MerchantContestController extends AbstractController
         }
 
         $source = $this->contestRepository->find($id);
-        if (!$source instanceof Contest || $source->getMerchant() !== $merchant) {
+        if (!$source instanceof Contest || !$this->isContestOwnedByMerchant($source, $merchant)) {
             return new JsonResponse(['error' => 'contest_not_found'], 404);
+        }
+
+        if ($source->getStatus() !== ContestStatus::FINISHED) {
+            return new JsonResponse(['error' => 'contest_clone_only_archived'], 409);
         }
 
         $clone = new Contest();
         $clone->setMerchant($merchant);
         $clone->setTitle($source->getTitle() . ' (copie)');
         $clone->setDescription($source->getDescription());
-        $clone->setStatus(ContestStatus::DRAFT);
+        $clone->setStatus(ContestStatus::SCHEDULED);
 
         $now = new \DateTimeImmutable();
-        $clone->setStartAt($now->modify('+1 day'));
-        $clone->setEndAt($now->modify('+8 day'));
-        $clone->setDrawAt($now->modify('+8 day'));
+        $clone->setStartAt($now->modify('+1 day')->setTime(0, 0, 0));
+        $clone->setEndAt($now->modify('+8 day')->setTime(23, 59, 59));
+        $clone->setDrawAt($now->modify('+8 day')->setTime(23, 59, 59));
 
         foreach ($source->getRewards() as $reward) {
             $newReward = new ContestReward();
@@ -181,7 +212,7 @@ class MerchantContestController extends AbstractController
         }
 
         $contest = $this->contestRepository->find($id);
-        if (!$contest instanceof Contest || $contest->getMerchant() !== $merchant) {
+        if (!$contest instanceof Contest || !$this->isContestOwnedByMerchant($contest, $merchant)) {
             return new JsonResponse(['error' => 'contest_not_found'], 404);
         }
 
@@ -192,26 +223,24 @@ class MerchantContestController extends AbstractController
             return new JsonResponse(['error' => 'contest_draw_not_ready'], 409);
         }
 
-        // Execute draw
         try {
-            $winners = $this->drawService->executeDraw($contest);
+            $winner = $this->drawService->drawNextReward($contest);
         } catch (\InvalidArgumentException $e) {
             return new JsonResponse(['error' => $e->getMessage()], 422);
         }
 
         return new JsonResponse([
-            'winners' => array_map(
-                fn ($winner) => [
-                    'id' => $winner->getId(),
-                    'customer_id' => $winner->getCustomer()->getId(),
-                    'customer_name' => $winner->getCustomer()->getName(),
-                    'reward_id' => $winner->getReward()->getId(),
-                    'reward_title' => $winner->getReward()->getTitle(),
-                    'reward_rank' => $winner->getReward()->getRank(),
-                    'qr_token' => $winner->getQrCodeToken(),
+            'winner' => $winner instanceof ContestWinner ? $this->formatWinner($winner) : null,
+            'remaining_rewards' => array_map(
+                static fn (ContestReward $reward) => [
+                    'id' => $reward->getId(),
+                    'title' => $reward->getTitle(),
+                    'image_url' => $reward->getImageUrl(),
+                    'rank' => $reward->getRank(),
                 ],
-                $winners,
+                $this->drawService->getRemainingRewards($contest),
             ),
+            'contest_status' => $contest->getStatus()->value,
         ]);
     }
 
@@ -237,7 +266,7 @@ class MerchantContestController extends AbstractController
         }
 
         // Validate merchant owns the contest
-        if ($winner->getContest()->getMerchant() !== $merchant) {
+        if (!$this->isContestOwnedByMerchant($winner->getContest(), $merchant)) {
             return new JsonResponse(['error' => 'forbidden'], 403);
         }
 
@@ -276,7 +305,7 @@ class MerchantContestController extends AbstractController
 
         if (!$isUpdate || array_key_exists('start_at', $payload)) {
             try {
-                $contest->setStartAt(new \DateTimeImmutable((string) ($payload['start_at'] ?? '')));
+                $contest->setStartAt($this->parseContestBoundaryDate($payload['start_at'] ?? null, false));
             } catch (\Throwable) {
                 return new JsonResponse(['error' => 'contest_start_at_invalid'], 422);
             }
@@ -284,7 +313,7 @@ class MerchantContestController extends AbstractController
 
         if (!$isUpdate || array_key_exists('end_at', $payload)) {
             try {
-                $contest->setEndAt(new \DateTimeImmutable((string) ($payload['end_at'] ?? '')));
+                $contest->setEndAt($this->parseContestBoundaryDate($payload['end_at'] ?? null, true));
             } catch (\Throwable) {
                 return new JsonResponse(['error' => 'contest_end_at_invalid'], 422);
             }
@@ -301,14 +330,8 @@ class MerchantContestController extends AbstractController
             $contest->setDrawAt($contest->getEndAt());
         }
 
-        if (array_key_exists('status', $payload)) {
-            try {
-                $contest->setStatus(ContestStatus::from((string) $payload['status']));
-            } catch (\Throwable) {
-                return new JsonResponse(['error' => 'contest_status_invalid'], 422);
-            }
-        } elseif (!$isUpdate) {
-            $contest->setStatus(ContestStatus::DRAFT);
+        if (!$isUpdate) {
+            $contest->setStatus(ContestStatus::SCHEDULED);
         }
 
         $startAt = $contest->getStartAt();
@@ -316,8 +339,13 @@ class MerchantContestController extends AbstractController
         if (!$startAt instanceof \DateTimeImmutable || !$endAt instanceof \DateTimeImmutable) {
             return new JsonResponse(['error' => 'contest_dates_required'], 422);
         }
-        if ($endAt <= $startAt) {
+        if ($endAt < $startAt) {
             return new JsonResponse(['error' => 'contest_end_before_start'], 422);
+        }
+
+        $drawAt = $contest->getDrawAt();
+        if ($drawAt instanceof \DateTimeImmutable && $drawAt < $endAt) {
+            return new JsonResponse(['error' => 'contest_draw_before_end'], 422);
         }
 
         if (array_key_exists('rewards', $payload)) {
@@ -325,11 +353,7 @@ class MerchantContestController extends AbstractController
                 return new JsonResponse(['error' => 'contest_rewards_required'], 422);
             }
 
-            foreach ($contest->getRewards()->toArray() as $existingReward) {
-                $contest->removeReward($existingReward);
-            }
-
-            $rank = 1;
+            $validatedRewards = [];
             foreach ($payload['rewards'] as $rewardPayload) {
                 if (!is_array($rewardPayload)) {
                     return new JsonResponse(['error' => 'contest_reward_invalid'], 422);
@@ -340,9 +364,31 @@ class MerchantContestController extends AbstractController
                     return new JsonResponse(['error' => 'contest_reward_title_required'], 422);
                 }
 
+                $validatedRewards[] = [
+                    'title' => $label,
+                    'image_url' => isset($rewardPayload['image_url']) ? trim((string) $rewardPayload['image_url']) : null,
+                ];
+            }
+
+            // On update, flush reward deletions before inserts to avoid unique (contest_id, rank) collisions.
+            if ($isUpdate && $contest->getRewards()->count() > 0) {
+                foreach ($contest->getRewards()->toArray() as $existingReward) {
+                    $contest->removeReward($existingReward);
+                }
+                $this->entityManager->flush();
+            } elseif (!$isUpdate) {
+                foreach ($contest->getRewards()->toArray() as $existingReward) {
+                    $contest->removeReward($existingReward);
+                }
+            }
+
+            $rank = 1;
+            foreach ($validatedRewards as $validatedReward) {
+                $label = $validatedReward['title'];
+
                 $reward = new ContestReward();
                 $reward->setTitle($label);
-                $reward->setImageUrl(isset($rewardPayload['image_url']) ? trim((string) $rewardPayload['image_url']) : null);
+                $reward->setImageUrl($validatedReward['image_url']);
                 $reward->setRank($rank);
                 $contest->addReward($reward);
                 $rank++;
@@ -352,6 +398,29 @@ class MerchantContestController extends AbstractController
         }
 
         return null;
+    }
+
+    private function parseContestBoundaryDate(mixed $rawValue, bool $isEndOfDay): \DateTimeImmutable
+    {
+        $raw = trim((string) $rawValue);
+        if ($raw === '') {
+            throw new \InvalidArgumentException('empty_date');
+        }
+
+        // Check if it's a date-only format (Y-m-d)
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) === 1) {
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+            if (!$date instanceof \DateTimeImmutable) {
+                throw new \InvalidArgumentException('invalid_date');
+            }
+
+            return $isEndOfDay ? $date->setTime(23, 59, 59) : $date->setTime(0, 0, 0);
+        }
+
+        // Parse as datetime and preserve the time provided
+        $dateTime = new \DateTimeImmutable($raw);
+
+        return $dateTime;
     }
 
     private function canEditContest(Contest $contest): bool
@@ -364,8 +433,46 @@ class MerchantContestController extends AbstractController
         return in_array($contest->getStatus(), [ContestStatus::DRAFT, ContestStatus::SCHEDULED], true);
     }
 
+    private function canDeleteContest(Contest $contest): bool
+    {
+        $now = new \DateTimeImmutable();
+        $startAt = $contest->getStartAt();
+
+        return $startAt instanceof \DateTimeImmutable && $now < $startAt;
+    }
+
     private function formatContest(Contest $contest): array
     {
+        $participantSummaries = [];
+        $participantCount = 0;
+        $participationCount = 0;
+
+        if (in_array($contest->getStatus(), [ContestStatus::ACTIVE, ContestStatus::FINISHED], true)) {
+            $participantSummaries = array_map(
+                static fn (array $participant): array => [
+                    'customer_id' => $participant['customer_id'],
+                    'customer_name' => $participant['customer_name'],
+                    'customer_email' => $participant['customer_email'],
+                    'participation_count' => $participant['participation_count'],
+                ],
+                $this->participationRepository->getParticipantSummaries($contest),
+            );
+            $participantCount = count($participantSummaries);
+            $participationCount = array_reduce(
+                $participantSummaries,
+                static fn (int $carry, array $participant): int => $carry + (int) ($participant['participation_count'] ?? 0),
+                0,
+            );
+        }
+
+        $winners = [];
+        if ($contest->getStatus() === ContestStatus::FINISHED) {
+            $winners = array_map(
+                fn (ContestWinner $winner) => $this->formatWinner($winner),
+                $this->winnerRepository->findByContest($contest),
+            );
+        }
+
         return [
             'id' => $contest->getId()?->toRfc4122(),
             'merchant_id' => $contest->getMerchant()?->getId()?->toRfc4122(),
@@ -384,8 +491,28 @@ class MerchantContestController extends AbstractController
                 ],
                 $contest->getRewards()->toArray(),
             ),
+            'participant_count' => $participantCount,
+            'participation_count' => $participationCount,
+            'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
+            'participants' => $participantSummaries,
+            'winners' => $winners,
             'created_at' => $contest->getCreatedAt()?->format(DATE_ATOM),
             'updated_at' => $contest->getUpdatedAt()?->format(DATE_ATOM),
+        ];
+    }
+
+    private function formatWinner(ContestWinner $winner): array
+    {
+        return [
+            'id' => $winner->getId(),
+            'customer_id' => $winner->getCustomer()?->getId(),
+            'customer_name' => $winner->getCustomer()?->getName(),
+            'customer_email' => $winner->getCustomer()?->getEmail(),
+            'reward_id' => $winner->getReward()?->getId(),
+            'reward_title' => $winner->getReward()?->getTitle(),
+            'reward_rank' => $winner->getReward()?->getRank(),
+            'is_claimed' => $winner->isClaimed(),
+            'qr_token' => $winner->getQrCodeToken(),
         ];
     }
 
@@ -407,5 +534,14 @@ class MerchantContestController extends AbstractController
         }
 
         return $user->getCustomer()?->getStaffMerchant();
+    }
+
+    private function isContestOwnedByMerchant(Contest $contest, Merchant $merchant): bool
+    {
+        $contestMerchant = $contest->getMerchant();
+        $contestMerchantId = $contestMerchant?->getId()?->toRfc4122();
+        $merchantId = $merchant->getId()?->toRfc4122();
+
+        return $contestMerchantId !== null && $merchantId !== null && $contestMerchantId === $merchantId;
     }
 }

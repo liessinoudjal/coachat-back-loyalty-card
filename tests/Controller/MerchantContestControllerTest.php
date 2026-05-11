@@ -22,8 +22,8 @@ class MerchantContestControllerTest extends WebTestCase
 
     protected function setUp(): void
     {
-        self::bootKernel();
-        $this->entityManager = self::getContainer()->get(EntityManagerInterface::class);
+        $uniqueId = bin2hex(random_bytes(4));
+        $email = 'merchant' . $uniqueId . '@example.com';
 
         // Create merchant and user
         $this->merchant = new Merchant();
@@ -31,13 +31,35 @@ class MerchantContestControllerTest extends WebTestCase
         $this->entityManager->persist($this->merchant);
 
         $this->merchantUser = new User();
-        $this->merchantUser->setEmail('merchant@example.com');
+        $this->merchantUser->setEmail($email);
         $this->merchantUser->setPassword(password_hash('password', PASSWORD_BCRYPT));
         $this->merchantUser->setRoles(['ROLE_MERCHANT']);
         $this->merchantUser->setMerchant($this->merchant);
         $this->entityManager->persist($this->merchantUser);
 
         $this->entityManager->flush();
+
+            // Initialize entity manager only once
+            if (!isset($this->entityManager)) {
+                $this->entityManager = self::getContainer()->get(EntityManagerInterface::class);
+            }
+
+            $uniqueId = bin2hex(random_bytes(4));
+            $email = 'merchant' . $uniqueId . '@example.com';
+
+            // Create merchant and user
+            $this->merchant = new Merchant();
+            $this->merchant->setCompanyName('Test Merchant');
+            $this->entityManager->persist($this->merchant);
+
+            $this->merchantUser = new User();
+            $this->merchantUser->setEmail($email);
+            $this->merchantUser->setPassword(password_hash('password', PASSWORD_BCRYPT));
+            $this->merchantUser->setRoles(['ROLE_MERCHANT']);
+            $this->merchantUser->setMerchant($this->merchant);
+            $this->entityManager->persist($this->merchantUser);
+
+            $this->entityManager->flush();
     }
 
     protected function tearDown(): void
@@ -50,7 +72,7 @@ class MerchantContestControllerTest extends WebTestCase
     {
         $client = self::createClient();
         $client->request('POST', '/api/auth/login', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
-            'email' => 'merchant@example.com',
+            'email' => $this->merchantUser->getEmail(),
             'password' => 'password',
         ]));
 
@@ -432,5 +454,108 @@ class MerchantContestControllerTest extends WebTestCase
 
         $data = json_decode($client->getResponse()->getContent(), true);
         $this->assertEquals('reward_already_claimed', $data['error']);
+    }
+
+    public function testCreateContestWithEndBeforeStart(): void
+    {
+        $client = self::createClient();
+        $this->login();
+
+        $startDate = new \DateTimeImmutable('+5 days');
+        $endDate = new \DateTimeImmutable('+2 days'); // Before start
+
+        $payload = [
+            'title' => 'Invalid Contest',
+            'start_at' => $startDate->format('c'),
+            'end_at' => $endDate->format('c'),
+            'rewards' => [['title' => 'Prize']],
+        ];
+
+        $client->request('POST', '/api/merchants/me/contests', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode($payload));
+        $this->assertResponseStatusCodeSame(422);
+
+        $data = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('contest_end_before_start', $data['error']);
+    }
+
+    public function testCreateContestWithDrawBeforeEnd(): void
+    {
+        $client = self::createClient();
+        $this->login();
+
+        $startDate = new \DateTimeImmutable('+1 day');
+        $endDate = new \DateTimeImmutable('+5 days');
+        $drawDate = new \DateTimeImmutable('+3 days'); // Before end
+
+        $payload = [
+            'title' => 'Invalid Draw Contest',
+            'start_at' => $startDate->format('c'),
+            'end_at' => $endDate->format('c'),
+            'draw_at' => $drawDate->format('c'),
+            'rewards' => [['title' => 'Prize']],
+        ];
+
+        $client->request('POST', '/api/merchants/me/contests', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode($payload));
+        $this->assertResponseStatusCodeSame(422);
+
+        $data = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('contest_draw_before_end', $data['error']);
+    }
+
+    public function testCreateContestWithDrawEqualToEnd(): void
+    {
+        $client = self::createClient();
+        $this->login();
+
+        $startDate = new \DateTimeImmutable('+1 day');
+        $endDate = new \DateTimeImmutable('+5 days 14:30:00');
+        $drawDate = $endDate; // Exactly at end time (should be allowed)
+
+        $payload = [
+            'title' => 'Valid Draw Contest',
+            'start_at' => $startDate->format('c'),
+            'end_at' => $endDate->format('c'),
+            'draw_at' => $drawDate->format('c'),
+            'rewards' => [['title' => 'Prize']],
+        ];
+
+        $client->request('POST', '/api/merchants/me/contests', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode($payload));
+        $this->assertResponseStatusCodeSame(201);
+
+        $data = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('Valid Draw Contest', $data['title']);
+    }
+
+    public function testCreateContestPreservesEndTime(): void
+    {
+        $client = self::createClient();
+        $this->login();
+
+        $startDate = new \DateTimeImmutable('+1 day 10:00:00');
+        $endDate = new \DateTimeImmutable('+5 days 18:45:30');
+        $drawDate = new \DateTimeImmutable('+6 days 09:00:00');
+
+        $payload = [
+            'title' => 'Timed Contest',
+            'start_at' => $startDate->format('c'),
+            'end_at' => $endDate->format('c'),
+            'draw_at' => $drawDate->format('c'),
+            'rewards' => [['title' => 'Prize']],
+        ];
+
+        $client->request('POST', '/api/merchants/me/contests', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode($payload));
+        $this->assertResponseStatusCodeSame(201);
+
+        $data = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('Timed Contest', $data['title']);
+
+        // Verify times are preserved
+        $endDateTime = new \DateTimeImmutable($data['end_at']);
+        $this->assertEquals(18, $endDateTime->format('H'));
+        $this->assertEquals(45, $endDateTime->format('i'));
+
+        $drawDateTime = new \DateTimeImmutable($data['draw_at']);
+        $this->assertEquals(9, $drawDateTime->format('H'));
+        $this->assertEquals(0, $drawDateTime->format('i'));
     }
 }

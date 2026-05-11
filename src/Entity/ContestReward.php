@@ -7,7 +7,7 @@ use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: ContestRewardRepository::class)]
 #[ORM\Table(name: 'contest_reward')]
-#[ORM\UniqueConstraint(name: 'UNIQ_CONTEST_REWARD_RANK', columns: ['contest_id', 'rank'])]
+    #[ORM\UniqueConstraint(name: 'UNIQ_CONTEST_REWARD_RANK', columns: ['contest_id', '`rank`'])]
 class ContestReward
 {
     #[ORM\Id]
@@ -25,7 +25,7 @@ class ContestReward
     #[ORM\Column(length: 2048, nullable: true)]
     private ?string $imageUrl = null;
 
-    #[ORM\Column]
+    #[ORM\Column(name: '`rank`')]
     private int $rank = 1;
 
     public function getId(): ?int
