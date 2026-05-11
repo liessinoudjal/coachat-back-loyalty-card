@@ -321,15 +321,9 @@ class AuthController extends AbstractController
             // Super admins are allowed to also be customers — do not block them.
             $isSuperAdmin = $this->isSuperAdminUser($user);
 
-            if (!$isSuperAdmin && $this->isMerchantLinkedUser($user)) {
-                return new JsonResponse([
-                    'error' => 'account_already_merchant',
-                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
-                ], 409);
-            }
-
-            // Keep merchant and customer login flows isolated to avoid accidental role merge.
-            if (!$isSuperAdmin && $user->getMerchant() !== null && $user->getCustomer() === null) {
+            // Allow equipier profiles (customer + staff merchant) to use customer OAuth flow.
+            // Block only accounts directly attached to a merchant entity.
+            if (!$isSuperAdmin && $user->getMerchant() instanceof Merchant) {
                 return new JsonResponse([
                     'error' => 'account_already_merchant',
                     'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',

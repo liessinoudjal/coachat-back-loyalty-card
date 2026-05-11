@@ -166,6 +166,78 @@ final class MerchantMapController extends AbstractController
         return new JsonResponse(['merchants' => $merchants]);
     }
 
+    #[Route('/api/customer/merchants/search', name: 'customer_merchants_search', methods: ['GET'])]
+    public function search(Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'unauthorized'], 401);
+        }
+
+        $customer = $user->getCustomer();
+        if (!$customer instanceof Customer) {
+            return new JsonResponse(['error' => 'customer_not_found'], 404);
+        }
+
+        $query = trim((string) $request->query->get('q', ''));
+        if (mb_strlen($query) < 3) {
+            return new JsonResponse(['merchants' => []]);
+        }
+
+        $limit = (int) $request->query->get('limit', 5);
+        $limit = max(1, min($limit, 10));
+
+        $lat = $request->query->get('lat');
+        $lng = $request->query->get('lng');
+        $lat = is_numeric($lat) ? (float) $lat : null;
+        $lng = is_numeric($lng) ? (float) $lng : null;
+
+        $rows = $this->merchantRepository->searchForMap($query, $limit, $lat, $lng);
+
+        $merchantById = [];
+        if (!empty($rows)) {
+            $uuids = array_map(
+                static fn(array $row) => Uuid::fromString((string) $row['id']),
+                $rows,
+            );
+            /** @var array<int, Merchant> $entities */
+            $entities = $this->entityManager->getRepository(Merchant::class)->findBy(['id' => $uuids]);
+            foreach ($entities as $entity) {
+                $id = $entity->getId()?->toRfc4122();
+                if ($id !== null) {
+                    $merchantById[$id] = $entity;
+                }
+            }
+        }
+
+        $today = new \DateTimeImmutable('today');
+
+        $merchants = array_map(function (array $row) use ($merchantById, $today): array {
+            $merchantEntity = $merchantById[$row['id']] ?? null;
+            $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
+                ? $merchantEntity->getActiveLoyaltyProgramCount() > 0
+                : false;
+            $hasActiveOffers = $merchantEntity instanceof Merchant
+                ? count($this->collectActiveOffers($merchantEntity, $today)) > 0
+                : false;
+
+            return [
+                'id' => $row['id'],
+                'company_name' => $row['company_name'],
+                'address' => $row['address'],
+                'postal_code' => $row['postal_code'],
+                'city' => $row['city'],
+                'latitude' => $row['latitude'],
+                'longitude' => $row['longitude'],
+                'distance_km' => $row['distance_km'],
+                'has_loyalty_programs' => $hasLoyaltyPrograms,
+                'has_active_promotional_offers' => $hasActiveOffers,
+            ];
+        }, $rows);
+
+        return new JsonResponse(['merchants' => $merchants]);
+    }
+
     #[Route('/api/customer/merchants/map-join', name: 'customer_map_join_merchant', methods: ['POST'])]
     public function joinFromMap(Request $request): JsonResponse
     {

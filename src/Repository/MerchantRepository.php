@@ -3,6 +3,7 @@
 namespace App\Repository;
 
 use App\Entity\Merchant;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Uid\Uuid;
@@ -148,5 +149,190 @@ class MerchantRepository extends ServiceEntityRepository
             ->andWhere('m.address IS NOT NULL AND m.address != \'\'')
             ->getQuery()
             ->getSingleScalarResult();
+    }
+
+    /**
+     * Search geocoded merchants by company name or full address text.
+     *
+     * @return array<int, array{
+     *   id: string,
+     *   company_name: string,
+     *   address: string|null,
+     *   postal_code: string|null,
+     *   city: string|null,
+     *   latitude: float,
+     *   longitude: float,
+     *   distance_km: float|null
+     * }>
+     */
+    public function searchForMap(string $query, int $limit, ?float $lat = null, ?float $lng = null): array
+    {
+        $normalized = mb_strtolower(trim($query));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $like = '%' . $normalized . '%';
+        $prefixLike = $normalized . '%';
+
+        if ($lat !== null && $lng !== null) {
+            $sql = '
+                SELECT
+                    BIN_TO_UUID(id) AS id,
+                    company_name,
+                    address,
+                    postal_code,
+                    city,
+                    latitude,
+                    longitude,
+                    (6371 * ACOS(
+                        COS(RADIANS(:lat)) * COS(RADIANS(latitude))
+                        * COS(RADIANS(longitude) - RADIANS(:lng))
+                        + SIN(RADIANS(:lat)) * SIN(RADIANS(latitude))
+                    )) AS distance_km
+                FROM merchant
+                WHERE latitude IS NOT NULL
+                  AND longitude IS NOT NULL
+                  AND (
+                    LOWER(company_name) LIKE :like
+                    OR LOWER(CONCAT_WS(\' \', address, postal_code, city)) LIKE :like
+                  )
+                ORDER BY
+                    CASE
+                      WHEN LOWER(company_name) LIKE :prefix_like THEN 0
+                      WHEN LOWER(CONCAT_WS(\' \', address, postal_code, city)) LIKE :prefix_like THEN 1
+                      ELSE 2
+                    END ASC,
+                    distance_km ASC,
+                    company_name ASC
+                LIMIT :limit
+            ';
+
+            $params = [
+                'lat' => $lat,
+                'lng' => $lng,
+                'like' => $like,
+                'prefix_like' => $prefixLike,
+                'limit' => $limit,
+            ];
+        } else {
+            $sql = '
+                SELECT
+                    BIN_TO_UUID(id) AS id,
+                    company_name,
+                    address,
+                    postal_code,
+                    city,
+                    latitude,
+                    longitude,
+                    NULL AS distance_km
+                FROM merchant
+                WHERE latitude IS NOT NULL
+                  AND longitude IS NOT NULL
+                  AND (
+                    LOWER(company_name) LIKE :like
+                    OR LOWER(CONCAT_WS(\' \', address, postal_code, city)) LIKE :like
+                  )
+                ORDER BY
+                    CASE
+                      WHEN LOWER(company_name) LIKE :prefix_like THEN 0
+                      WHEN LOWER(CONCAT_WS(\' \', address, postal_code, city)) LIKE :prefix_like THEN 1
+                      ELSE 2
+                    END ASC,
+                    company_name ASC
+                LIMIT :limit
+            ';
+
+            $params = [
+                'like' => $like,
+                'prefix_like' => $prefixLike,
+                'limit' => $limit,
+            ];
+        }
+
+        $rows = $this->getEntityManager()
+            ->getConnection()
+            ->executeQuery(
+                $sql,
+                $params,
+                ['limit' => ParameterType::INTEGER],
+            )
+            ->fetchAllAssociative();
+
+        return array_map(static fn(array $row) => [
+            'id' => (string) $row['id'],
+            'company_name' => (string) $row['company_name'],
+            'address' => $row['address'] !== null ? (string) $row['address'] : null,
+            'postal_code' => $row['postal_code'] !== null ? (string) $row['postal_code'] : null,
+            'city' => $row['city'] !== null ? (string) $row['city'] : null,
+            'latitude' => (float) $row['latitude'],
+            'longitude' => (float) $row['longitude'],
+            'distance_km' => $row['distance_km'] !== null ? round((float) $row['distance_km'], 2) : null,
+        ], $rows);
+    }
+
+    /**
+     * Public showcase merchants for website carousel + SEO payload seed.
+     *
+     * @return array<int, array{
+     *   id: string,
+     *   company_name: string,
+     *   address: string|null,
+     *   postal_code: string|null,
+     *   city: string|null,
+     *   logo_url: string|null,
+     *   has_loyalty_programs: bool,
+     *   has_active_promotional_offers: bool
+     * }>
+     */
+    public function listForPublicShowcase(int $limit): array
+    {
+        $sql = '
+            SELECT
+                BIN_TO_UUID(m.id) AS id,
+                m.company_name,
+                m.address,
+                m.postal_code,
+                m.city,
+                m.logo_url,
+                EXISTS(
+                    SELECT 1
+                    FROM loyalty_program lp
+                    WHERE lp.merchant_id = m.id
+                      AND lp.is_active = 1
+                ) AS has_loyalty_programs,
+                EXISTS(
+                    SELECT 1
+                    FROM promotional_offer po
+                    WHERE po.merchant_id = m.id
+                      AND po.starts_on <= CURRENT_DATE()
+                      AND po.ends_on >= CURRENT_DATE()
+                ) AS has_active_promotional_offers
+            FROM merchant m
+            WHERE m.company_name IS NOT NULL
+              AND m.company_name != \'\'
+            ORDER BY m.company_name ASC
+            LIMIT :limit
+        ';
+
+        $rows = $this->getEntityManager()
+            ->getConnection()
+            ->executeQuery(
+                $sql,
+                ['limit' => $limit],
+                ['limit' => ParameterType::INTEGER],
+            )
+            ->fetchAllAssociative();
+
+        return array_map(static fn(array $row) => [
+            'id' => (string) $row['id'],
+            'company_name' => (string) $row['company_name'],
+            'address' => $row['address'] !== null ? (string) $row['address'] : null,
+            'postal_code' => $row['postal_code'] !== null ? (string) $row['postal_code'] : null,
+            'city' => $row['city'] !== null ? (string) $row['city'] : null,
+            'logo_url' => $row['logo_url'] !== null ? (string) $row['logo_url'] : null,
+            'has_loyalty_programs' => (bool) $row['has_loyalty_programs'],
+            'has_active_promotional_offers' => (bool) $row['has_active_promotional_offers'],
+        ], $rows);
     }
 }

@@ -48,6 +48,7 @@ security:
         - { path: ^/api/auth/customer/google$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/customer/google/callback$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/refresh$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/merchants/showcase$, roles: PUBLIC_ACCESS }
         - { path: ^/api/legal/terms/current-version, roles: PUBLIC_ACCESS }
         - { path: ^/api/plans, roles: PUBLIC_ACCESS }
         - { path: ^/api/subscription/webhook, roles: PUBLIC_ACCESS }
