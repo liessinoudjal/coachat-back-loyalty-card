@@ -8,6 +8,19 @@ framework:
     #esi: true
     #fragments: true
 
+    rate_limiter:
+        public_map_view_limiter:
+            policy: 'sliding_window'
+            limit: 60
+            interval: '1 minute'
+        public_map_search_limiter:
+            policy: 'sliding_window'
+            limit: 120
+            interval: '1 minute'
+        public_map_detail_limiter:
+            policy: 'sliding_window'
+            limit: 90
+            interval: '1 minute'
 when@test:
     framework:
         test: true

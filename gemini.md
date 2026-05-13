@@ -2038,6 +2038,108 @@ Le module public legacy de claim customer a été retiré du backend.
 - cartes customer via `GET /api/customers/me/cards`
 - rewards customer via `GET /api/customers/me/rewards`
 
+---
+
+## Carte publique – Découverte des marchands (sans auth)
+
+Ces endpoints sont **publics** (aucun JWT requis). Ils alimentent la landing page statique (`index.html`) et la carte interactive customer (`/app/map`).
+
+> **Note suppression showcase** : L'endpoint `GET /api/public/merchants/showcase` a été **supprimé**. La découverte se fait exclusivement via la carte interactive et la recherche.
+
+### Map publique – Chargement des pins
+```
+GET /api/public/merchants/map
+```
+
+Retourne les marchands visibles dans une zone géographique (bounds).
+
+**Query params :**
+- `north`, `south`, `east`, `west` (float) — bounding box de la carte
+- `zoom` (int, optionnel) — niveau de zoom courant
+
+**Réponse :**
+```json
+{
+  "merchants": [
+    {
+      "id": "uuid",
+      "company_name": "Ma Boulangerie",
+      "latitude": 47.902,
+      "longitude": 1.909,
+      "has_active_promotional_offers": true,
+      "has_loyalty_programs": true
+    }
+  ]
+}
+```
+
+### Recherche publique de marchands
+```
+GET /api/public/merchants/search?q=&limit=&lat=&lng=
+```
+
+Recherche texte sur les marchands. Côté frontend, ce call est combiné avec un appel à `api-adresse.data.gouv.fr` (BAN – Base Adresse Nationale) pour les résultats d'adresse. **Ne pas utiliser Nominatim/OpenStreetMap** pour le géocodage.
+
+**Query params :**
+- `q` (string, requis, min 3 chars) — terme de recherche
+- `limit` (int, défaut 5) — nombre max de résultats
+- `lat`, `lng` (float, optionnel) — position de l'utilisateur pour trier par proximité
+
+**Rate limiting :** `429 Too Many Requests` si le seuil est dépassé. Le frontend affiche un message "Trop de requêtes, réessayez dans une minute." et ne relance pas automatiquement.
+
+**Réponse :**
+```json
+{
+  "merchants": [
+    {
+      "id": "uuid",
+      "company_name": "Coachat Test",
+      "address": "12 rue de la Paix",
+      "postal_code": "45000",
+      "city": "Orléans",
+      "latitude": 47.902,
+      "longitude": 1.909,
+      "has_active_promotional_offers": false,
+      "has_loyalty_programs": true
+    }
+  ]
+}
+```
+
+### Détail d'un marchand public
+```
+GET /api/public/merchants/{id}
+```
+
+Retourne le profil complet d'un marchand pour le bottom sheet de la carte.
+
+**Réponse :**
+```json
+{
+  "id": "uuid",
+  "company_name": "Coachat Test",
+  "address": "12 rue de la Paix",
+  "postal_code": "45000",
+  "city": "Orléans",
+  "phone": "...",
+  "website": "...",
+  "latitude": 47.902,
+  "longitude": 1.909,
+  "loyalty_programs": [...],
+  "active_promotional_offers": [...]
+}
+```
+
+### Comportement de la carte publique (index.html)
+
+- **Centrage par défaut** : Orléans (`lat: 47.9029, lng: 1.9092`, zoom 13) — indépendamment de la géolocalisation.
+- **Géolocalisation** : utilisée uniquement pour enrichir les appels search (`lat`/`lng` params) pour le tri par proximité. Elle ne recentre **pas** la carte.
+- **Recherche** : double appel parallèle — marchands (backend) + adresses (BAN `api-adresse.data.gouv.fr`). Résultats fusionnés, max 8.
+- **Clic résultat de recherche** : `flyTo` + surlignage du pin uniquement. Le bottom sheet marchand s'ouvre **uniquement au clic sur un pin**.
+- **Aucun résultat** : affiche un CTA "Vous êtes commerçant ? Inscrivez votre établissement ici" pointant vers `/register`.
+
+---
+
 3. Backend résout le Stripe Price ID depuis la BDD (non exposé)
 4. Backend crée/récupère le customer Stripe et crée une session Checkout
 5. Frontend redirige vers `checkoutUrl`
