@@ -5,6 +5,8 @@ namespace App\Service;
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\Merchant;
+use App\Exception\CustomerMerchantLimitReachedException;
+use App\Repository\CustomerRepository;
 use App\Repository\CustomerMerchantNotificationPreferenceRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -12,8 +14,29 @@ class CustomerMerchantLinker
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly CustomerRepository $customerRepository,
         private readonly CustomerMerchantNotificationPreferenceRepository $preferenceRepository,
     ) {
+    }
+
+    public function assertMerchantCanAcceptCustomer(Merchant $merchant): void
+    {
+        $plan = $merchant->getPlan();
+        if ($plan === null || $plan->getMaxCustomers() < 0) {
+            return;
+        }
+
+        $currentCustomers = $this->customerRepository->countByMerchant($merchant);
+        $maxCustomers = (int) $plan->getMaxCustomers();
+
+        if ($currentCustomers >= $maxCustomers) {
+            throw new CustomerMerchantLimitReachedException(
+                merchantId: $merchant->getId()?->toRfc4122() ?? 'n/a',
+                merchantName: (string) ($merchant->getCompanyName() ?? 'merchant'),
+                currentCustomers: $currentCustomers,
+                maxCustomers: $maxCustomers,
+            );
+        }
     }
 
     /**
@@ -24,6 +47,10 @@ class CustomerMerchantLinker
     public function link(Customer $customer, Merchant $merchant): bool
     {
         $isNewLink = !$customer->getMerchants()->contains($merchant);
+
+        if ($isNewLink) {
+            $this->assertMerchantCanAcceptCustomer($merchant);
+        }
 
         if ($isNewLink) {
             $customer->addMerchant($merchant);

@@ -10,6 +10,7 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
+use App\Repository\CustomerRepository;
 use App\Service\NotificationService;
 use App\Service\CustomerMerchantLinker;
 use App\Service\RefreshTokenService;
@@ -388,6 +389,60 @@ final class AuthControllerTest extends TestCase
         self::assertNotSame('', $payload['state']);
     }
 
+    public function testCustomerQrAuthReturnsLimitErrorWhenMerchantAtCapacity(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Limited Merchant');
+        $merchant->setPlan($this->buildPlanWithCustomerLimit(1));
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $customerRepositoryService = $this->createMock(CustomerRepository::class);
+        $customerRepositoryService
+            ->expects(self::once())
+            ->method('countByMerchant')
+            ->with(self::identicalTo($merchant))
+            ->willReturn(1);
+
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+        $signupAlertMailer
+            ->expects(self::once())
+            ->method('notifyMerchantSignupRefusedDueToCustomerLimit')
+            ->with(
+                self::identicalTo($merchant),
+                null,
+                1,
+                1,
+                'parcours inscription Google',
+            );
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            ),
+            $signupAlertMailer,
+            null,
+            $customerRepositoryService,
+        );
+
+        $response = $controller->googleCustomerAuth(Request::create(
+            '/api/auth/customer/google',
+            'GET',
+            [
+                'merchant_ref' => $merchantRef,
+                'redirect_uri' => 'https://front.example.com/auth/customer/callback',
+            ],
+        ));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('customer_limit_reached', $payload['error']);
+        self::assertSame(1, $payload['current_customers']);
+        self::assertSame(1, $payload['max_customers']);
+    }
+
     private function createController(
         EntityRepository $userRepository,
         EntityRepository $customerRepository,
@@ -403,6 +458,7 @@ final class AuthControllerTest extends TestCase
         EntityManagerInterface $entityManager,
         ?SignupAlertMailer $signupAlertMailer = null,
         ?NotificationService $notificationService = null,
+        ?CustomerRepository $customerRepositoryService = null,
     ): AuthController
     {
         $provider = $this->createMock(AbstractProvider::class);
@@ -431,6 +487,10 @@ final class AuthControllerTest extends TestCase
 
         $signupAlertMailer ??= $this->createMock(SignupAlertMailer::class);
         $notificationService ??= $this->createMock(NotificationService::class);
+        if ($customerRepositoryService === null) {
+            $customerRepositoryService = $this->createMock(CustomerRepository::class);
+            $customerRepositoryService->method('countByMerchant')->willReturn(0);
+        }
         $notificationPreferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
         $notificationPreferenceRepository
             ->method('findOneByCustomerAndMerchant')
@@ -438,6 +498,7 @@ final class AuthControllerTest extends TestCase
 
         $customerMerchantLinker = new CustomerMerchantLinker(
             $entityManager,
+            $customerRepositoryService,
             $notificationPreferenceRepository,
         );
 
@@ -511,6 +572,23 @@ final class AuthControllerTest extends TestCase
         );
 
         return $repository;
+    }
+
+    private function buildPlanWithCustomerLimit(int $maxCustomers): \App\Entity\Plan
+    {
+        $plan = new \App\Entity\Plan();
+        $plan->setSlug('free');
+        $plan->setName('Free');
+        $plan->setPriceMonthly(0);
+        $plan->setMaxCustomers($maxCustomers);
+        $plan->setMaxPrograms(1);
+        $plan->setHasWalletIntegration(false);
+        $plan->setHasPushNotifications(false);
+        $plan->setHasAdvancedStats(false);
+        $plan->setIsActive(true);
+        $plan->setStripePriceId('price_free');
+
+        return $plan;
     }
 
     private function createNotificationPreferenceRepository(?callable $resolver = null): EntityRepository&MockObject

@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Customer;
 use App\Entity\User;
 use App\Entity\Merchant;
+use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\UserRepository;
 use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
@@ -265,6 +266,27 @@ class AuthController extends AbstractController
         if ($merchant->getSubscriptionStatus() === 'canceled') {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
+        try {
+            $this->customerMerchantLinker->assertMerchantCanAcceptCustomer($merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                null,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'parcours inscription Google',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
 
         $response = $this->buildGoogleAuthorizationPayload($redirectUri);
 
@@ -312,6 +334,27 @@ class AuthController extends AbstractController
         if ($merchant->getSubscriptionStatus() === 'canceled') {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
+        try {
+            $this->customerMerchantLinker->assertMerchantCanAcceptCustomer($merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                null,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'parcours inscription Google',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
 
         try {
             $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
@@ -356,7 +399,27 @@ class AuthController extends AbstractController
             }
 
             $shouldNotifyCustomerSignup = $customer->getId() === null;
-            $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $merchant);
+            try {
+                $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $merchant);
+            } catch (CustomerMerchantLimitReachedException $exception) {
+                $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                    $merchant,
+                    $customer,
+                    $exception->getCurrentCustomers(),
+                    $exception->getMaxCustomers(),
+                    'parcours inscription Google',
+                );
+
+                return new JsonResponse([
+                    'error' => $exception->getMessage(),
+                    'message' => sprintf(
+                        'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                        $exception->getMaxCustomers(),
+                    ),
+                    'current_customers' => $exception->getCurrentCustomers(),
+                    'max_customers' => $exception->getMaxCustomers(),
+                ], 409);
+            }
             if ($isNewMerchantLink) {
                 $shouldNotifyCustomerSignup = true;
             }

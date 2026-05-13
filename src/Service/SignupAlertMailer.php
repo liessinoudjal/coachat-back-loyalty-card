@@ -22,6 +22,7 @@ class SignupAlertMailer
         private readonly string $alertRecipient,
         private readonly string $fromEmail,
         private readonly string $fromName,
+        private readonly string $appFrontBaseUrl,
     ) {
     }
 
@@ -173,6 +174,82 @@ class SignupAlertMailer
         } catch (\Throwable $e) {
             $this->merchantLogger->error('Failed to send merchant map-join notification.', [
                 'merchant_email' => $merchantEmail,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function notifyMerchantSignupRefusedDueToCustomerLimit(
+        Merchant $merchant,
+        ?Customer $customer,
+        int $currentCustomers,
+        int $maxCustomers,
+        string $sourceLabel,
+    ): void {
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail();
+        if ($merchantEmail === null || trim($merchantEmail) === '') {
+            $this->merchantLogger->warning('Merchant limit notification skipped: no email.', [
+                'merchant_id' => $merchant->getId()?->toRfc4122(),
+            ]);
+            return;
+        }
+
+        $merchantName = $merchant->getCompanyName() ?? 'votre commerce';
+        $merchantId = $merchant->getId()?->toRfc4122() ?? 'n/a';
+        $customerEmail = $customer?->getEmail() ?? $customer?->getUser()?->getEmail() ?? 'n/a';
+        $customerName = $customer?->getName() ?? $customer?->getUser()?->getName() ?? 'n/a';
+        $subscriptionUrl = rtrim($this->appFrontBaseUrl, '/') . '/subscription';
+
+        $subject = sprintf('Inscription customer refusée - plafond atteint chez %s', $merchantName);
+        $textBody = array_filter([
+            sprintf('Bonjour %s,', $merchantName),
+            '',
+                'Une demande d\'inscription client a été refusée car le plafond de votre plan est atteint.',
+                sprintf('Plafond : %d abonnés maximum', $maxCustomers),
+                sprintf('Abonnés actuels : %d', $currentCustomers),
+                sprintf('Accédez à votre dashboard d\'abonnement pour activer un plan supérieur : %s', $subscriptionUrl),
+            sprintf('Merchant ID: %s', $merchantId),
+            sprintf('Source: %s', $sourceLabel),
+            $customer !== null ? sprintf('Nom client: %s', $customerName) : null,
+            $customer !== null ? sprintf('Email client: %s', $customerEmail) : null,
+        ]);
+
+        $email = (new \Symfony\Component\Mime\Email())
+            ->from(new \Symfony\Component\Mime\Address($this->fromEmail, $this->fromName))
+            ->to($merchantEmail)
+            ->subject($subject)
+            ->text(implode("\n", $textBody))
+            ->html($this->twig->render('emails/signup_alert_base.html.twig', [
+                'email_title' => 'Inscription client refusée',
+                'email_eyebrow' => 'Plafond atteint',
+                'email_accent' => 'Alerte',
+                'summary' => sprintf(
+                    'Une demande d\'inscription client a été refusée chez %s car le plafond de votre plan est atteint.',
+                    $merchantName,
+                ),
+                'primary_value' => sprintf('%d / %d abonnés', $currentCustomers, $maxCustomers),
+                'primary_label' => 'Plafond atteint',
+                'secondary_value' => $sourceLabel,
+                'secondary_label' => 'Source',
+                'dashboard_url' => $subscriptionUrl,
+                'cta_label' => 'Activer un plan supérieur',
+                    'cta_text' => 'Accédez à votre dashboard d\'abonnement pour activer un plan supérieur et rouvrir les inscriptions.',
+                'cta_url' => $subscriptionUrl,
+            ]));
+
+        try {
+            $this->mailer->send($email);
+            $this->merchantLogger->info('Merchant limit notification sent.', [
+                'merchant_email' => $merchantEmail,
+                'merchant_id' => $merchantId,
+                'current_customers' => $currentCustomers,
+                'max_customers' => $maxCustomers,
+                'source' => $sourceLabel,
+            ]);
+        } catch (\Throwable $e) {
+            $this->merchantLogger->error('Failed to send merchant limit notification.', [
+                'merchant_email' => $merchantEmail,
+                'merchant_id' => $merchantId,
                 'exception' => $e->getMessage(),
             ]);
         }

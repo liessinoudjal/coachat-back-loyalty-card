@@ -131,6 +131,8 @@ final class PublicMerchantMapController extends AbstractController
 
             // Count subscribers for social proof
             $subscriberCount = $this->customerRepository->countByMerchant($merchant);
+            $plan = $merchant->getPlan();
+            $customerSignupAvailable = $plan === null || $plan->getMaxCustomers() < 0 || $subscriberCount < $plan->getMaxCustomers();
 
             $merchants[] = [
                 'id' => $merchantId,
@@ -144,6 +146,7 @@ final class PublicMerchantMapController extends AbstractController
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
                 'subscriber_count' => $subscriberCount,
+                'customer_signup_available' => $customerSignupAvailable,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,

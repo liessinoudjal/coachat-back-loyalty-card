@@ -16,6 +16,28 @@ class CustomerRepository extends ServiceEntityRepository
     {
         parent::__construct($registry, Customer::class);
     }
+
+    /**
+     * Count all customers belonging to a specific merchant.
+     *
+     * A customer belongs to a merchant either:
+     * - directly (created under this merchant), or
+     * - historically via at least one loyalty card linked to this merchant's program.
+     */
+    public function countByMerchant(Merchant $merchant): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(DISTINCT c.id)')
+            ->leftJoin('c.merchant', 'directMerchant')
+            ->leftJoin('c.merchants', 'linkedMerchant')
+            ->leftJoin('c.loyaltyCards', 'lc')
+            ->leftJoin('lc.merchant', 'cardMerchant')
+            ->andWhere('directMerchant.id = :merchantId OR linkedMerchant.id = :merchantId OR cardMerchant.id = :merchantId')
+            ->setParameter('merchantId', $merchant->getId(), 'uuid')
+            ->getQuery()
+            ->getSingleScalarResult()
+        ;
+    }
     /**
      * Find all customers belonging to a specific merchant.
      *
@@ -38,26 +60,6 @@ class CustomerRepository extends ServiceEntityRepository
             ->orderBy('c.name', 'ASC')
             ->getQuery()
             ->getResult()
-        ;
-    }
-
-    /**
-     * Count all customers belonging to a specific merchant (for social proof / subscriber count).
-     *
-     * Uses the same logic as findByMerchant() but returns a count instead.
-     */
-    public function countByMerchant(Merchant $merchant): int
-    {
-        return (int) $this->createQueryBuilder('c')
-            ->select('COUNT(DISTINCT c.id)')
-            ->leftJoin('c.merchant', 'directMerchant')
-            ->leftJoin('c.merchants', 'linkedMerchant')
-            ->leftJoin('c.loyaltyCards', 'lc')
-            ->leftJoin('lc.merchant', 'cardMerchant')
-            ->andWhere('directMerchant.id = :merchantId OR linkedMerchant.id = :merchantId OR cardMerchant.id = :merchantId')
-            ->setParameter('merchantId', $merchant->getId(), 'uuid')
-            ->getQuery()
-            ->getSingleScalarResult()
         ;
     }
 

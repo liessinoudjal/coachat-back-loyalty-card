@@ -7,6 +7,7 @@ use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
+use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
@@ -148,6 +149,8 @@ final class MerchantMapController extends AbstractController
 
             // Count subscribers for social proof
             $subscriberCount = $this->customerRepository->countByMerchant($merchant);
+            $plan = $merchant->getPlan();
+            $customerSignupAvailable = $plan === null || $plan->getMaxCustomers() < 0 || $subscriberCount < $plan->getMaxCustomers();
 
             $merchants[] = [
                 'id' => $merchantId,
@@ -161,6 +164,7 @@ final class MerchantMapController extends AbstractController
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
                 'subscriber_count' => $subscriberCount,
+                'customer_signup_available' => $customerSignupAvailable,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'is_customer_linked' => isset($linkedMerchantIds[$merchantId]),
                 'loyalty_programs' => $loyaltyPrograms,
@@ -275,7 +279,27 @@ final class MerchantMapController extends AbstractController
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
-        $isNewLink = $this->customerMerchantLinker->link($customer, $merchant);
+        try {
+            $isNewLink = $this->customerMerchantLinker->link($customer, $merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                $customer,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'carte interactive',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
         $this->entityManager->flush();
 
         if ($isNewLink) {

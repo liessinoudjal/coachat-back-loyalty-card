@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Merchant;
 use App\Entity\MerchantAssetDownloadEvent;
+use App\Repository\CustomerRepository;
 use App\Repository\PlanRepository;
 use App\Service\LegalTermsVersionProvider;
 use App\Service\SignupAlertMailer;
@@ -20,13 +21,15 @@ class MerchantController extends AbstractController
 
     private $entityManager;
     private $planRepository;
+    private CustomerRepository $customerRepository;
     private LegalTermsVersionProvider $legalTermsVersionProvider;
     private SignupAlertMailer $signupAlertMailer;
 
-    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
+    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, CustomerRepository $customerRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
     {
         $this->entityManager = $entityManager;
         $this->planRepository = $planRepository;
+        $this->customerRepository = $customerRepository;
         $this->legalTermsVersionProvider = $legalTermsVersionProvider;
         $this->signupAlertMailer = $signupAlertMailer;
     }
@@ -106,7 +109,7 @@ class MerchantController extends AbstractController
         }
 
         $plan = $merchant->getPlan();
-        $customerCount = $merchant->getLoyaltyCards()->count();
+        $customerCount = $this->customerRepository->countByMerchant($merchant);
         $programCount = $merchant->getLoyaltyPrograms()->count();
 
         return new JsonResponse([

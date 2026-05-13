@@ -8,9 +8,11 @@ use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
+use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\PromotionalOfferRepository;
 use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,16 +25,19 @@ class CustomerController extends AbstractController
     private $entityManager;
     private $notificationService;
     private $customerMerchantLinker;
+    private $signupAlertMailer;
 
     public function __construct(
         EntityManagerInterface $entityManager,
         NotificationService $notificationService,
         CustomerMerchantLinker $customerMerchantLinker,
+        SignupAlertMailer $signupAlertMailer,
     )
     {
         $this->entityManager = $entityManager;
         $this->notificationService = $notificationService;
         $this->customerMerchantLinker = $customerMerchantLinker;
+        $this->signupAlertMailer = $signupAlertMailer;
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
@@ -79,7 +84,27 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
-        $this->customerMerchantLinker->link($customer, $merchant);
+        try {
+            $this->customerMerchantLinker->link($customer, $merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                $customer,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'espace client',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
         $this->entityManager->flush();
 
         return new JsonResponse([
