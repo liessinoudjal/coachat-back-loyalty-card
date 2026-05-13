@@ -7,6 +7,7 @@ use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
+use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
 use App\Service\CustomerMerchantLinker;
@@ -23,6 +24,7 @@ final class MerchantMapController extends AbstractController
 {
     public function __construct(
         private readonly MerchantRepository $merchantRepository,
+        private readonly CustomerRepository $customerRepository,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly CustomerMerchantLinker $customerMerchantLinker,
@@ -144,6 +146,9 @@ final class MerchantMapController extends AbstractController
                 ];
             }
 
+            // Count subscribers for social proof
+            $subscriberCount = $this->customerRepository->countByMerchant($merchant);
+
             $merchants[] = [
                 'id' => $merchantId,
                 'company_name' => $merchant->getCompanyName(),
@@ -155,6 +160,7 @@ final class MerchantMapController extends AbstractController
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
+                'subscriber_count' => $subscriberCount,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'is_customer_linked' => isset($linkedMerchantIds[$merchantId]),
                 'loyalty_programs' => $loyaltyPrograms,

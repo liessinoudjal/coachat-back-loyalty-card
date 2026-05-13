@@ -1,0 +1,455 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Co-Achat Loyalty Card - Public Merchant API",
+    "description": "Public API for discovering merchants with geolocation, loyalty programs, promotional offers, and Google Reviews integration. This API is freely accessible without authentication.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Co-Achat Support",
+      "url": "https://coachat-loyalty-card.test"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://coachat-loyalty-card.test/terms"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000/api",
+      "description": "Development server"
+    },
+    {
+      "url": "http://coachat-backend-loyalty-card.test/api",
+      "description": "Local environment"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Public",
+      "description": "Public endpoints - no authentication required"
+    }
+  ],
+  "paths": {
+    "/public/merchants/map": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "Get merchants map",
+        "description": "Discover merchants with geolocation, loyalty programs, promotional offers, and Google Reviews configuration. Results are filtered by distance and search criteria.",
+        "operationId": "getMerchantsMap",
+        "parameters": [
+          {
+            "name": "latitude",
+            "in": "query",
+            "description": "Latitude of search center point",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "example": 48.8566
+            }
+          },
+          {
+            "name": "longitude",
+            "in": "query",
+            "description": "Longitude of search center point",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "example": 2.3522
+            }
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "description": "Search radius in kilometers (default: 10)",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "default": 10,
+              "example": 5
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results (default: 20, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100,
+              "example": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Pagination offset (default: 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "example": 0
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Text search on merchant name (case-insensitive)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "Boulangerie"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of merchants with their details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantsMapResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_lat_lon": {
+                    "value": {
+                      "error": "Invalid latitude/longitude",
+                      "message": "latitude and longitude must be valid numbers"
+                    }
+                  },
+                  "invalid_radius": {
+                    "value": {
+                      "error": "Invalid radius",
+                      "message": "radius_km must be positive"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MerchantsMapResponse": {
+        "type": "object",
+        "description": "Response containing list of merchants for map view",
+        "required": ["merchants", "total"],
+        "properties": {
+          "merchants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MapMerchant"
+            },
+            "description": "List of merchants matching search criteria"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total number of merchants matching criteria (without pagination)",
+            "example": 145
+          }
+        }
+      },
+      "MapMerchant": {
+        "type": "object",
+        "description": "Merchant data for map display",
+        "required": [
+          "id",
+          "company_name",
+          "latitude",
+          "longitude",
+          "has_active_content",
+          "is_customer_linked",
+          "loyalty_programs",
+          "active_promotional_offers"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique merchant identifier",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "company_name": {
+            "type": "string",
+            "description": "Merchant business name",
+            "example": "Boulangerie Martin"
+          },
+          "address": {
+            "type": ["string", "null"],
+            "description": "Complete street address",
+            "example": "123 rue de la Paix, 75000 Paris"
+          },
+          "postal_code": {
+            "type": ["string", "null"],
+            "description": "Postal code",
+            "example": "75000"
+          },
+          "city": {
+            "type": ["string", "null"],
+            "description": "City name",
+            "example": "Paris"
+          },
+          "phone": {
+            "type": ["string", "null"],
+            "description": "Merchant phone number",
+            "example": "01 23 45 67 89"
+          },
+          "logo_url": {
+            "type": ["string", "null"],
+            "description": "Merchant logo as base64 data URL",
+            "example": "data:image/png;base64,iVBORw0KGgoAAAANS..."
+          },
+          "latitude": {
+            "type": "number",
+            "format": "float",
+            "description": "Geographic latitude",
+            "example": 48.8566
+          },
+          "longitude": {
+            "type": "number",
+            "format": "float",
+            "description": "Geographic longitude",
+            "example": 2.3522
+          },
+          "distance_km": {
+            "type": ["number", "null"],
+            "format": "float",
+            "description": "Distance from search center in kilometers (null if no geolocation provided)",
+            "example": 2.5
+          },
+          "subscriber_count": {
+            "type": ["integer", "null"],
+            "description": "Number of active subscribers (social proof)",
+            "example": 42
+          },
+          "has_active_content": {
+            "type": "boolean",
+            "description": "Merchant has at least one active loyalty program or promotional offer",
+            "example": true
+          },
+          "is_customer_linked": {
+            "type": "boolean",
+            "description": "Current user is linked to this merchant (requires customer authentication)",
+            "example": false
+          },
+          "loyalty_programs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MapLoyaltyProgram"
+            },
+            "description": "Active loyalty programs"
+          },
+          "active_promotional_offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MapActiveOffer"
+            },
+            "description": "Active promotional offers"
+          },
+          "google_review": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MapGoogleReview"
+              },
+              {
+                "type": "null",
+                "description": "Null if Google Review module is not fully configured"
+              }
+            ],
+            "description": "Google Review module configuration (null if incomplete)"
+          }
+        }
+      },
+      "MapLoyaltyProgram": {
+        "type": "object",
+        "description": "Loyalty program summary for map display",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "reward_description",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Program identifier",
+            "example": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "Program name",
+            "example": "Fidélité Pains"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["STAMP", "POINTS"],
+            "description": "Program type",
+            "example": "STAMP"
+          },
+          "stamp_target": {
+            "type": ["integer", "null"],
+            "description": "Number of stamps required for reward (only for STAMP type)",
+            "example": 10
+          },
+          "reward_description": {
+            "type": "string",
+            "description": "Reward description",
+            "example": "1 pain offert"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Program is active",
+            "example": true
+          }
+        }
+      },
+      "MapActiveOffer": {
+        "type": "object",
+        "description": "Promotional offer summary for map display",
+        "required": [
+          "id",
+          "name",
+          "valid_from",
+          "valid_until",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Offer identifier",
+            "example": 2
+          },
+          "name": {
+            "type": "string",
+            "description": "Offer name",
+            "example": "Promo Croissants"
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Short offer description",
+            "example": "30% de réduction"
+          },
+          "discount_percentage": {
+            "type": ["integer", "null"],
+            "description": "Discount percentage if applicable",
+            "example": 30
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Offer validity start (ISO 8601)",
+            "example": "2026-05-13T00:00:00Z"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Offer validity end (ISO 8601)",
+            "example": "2026-05-20T23:59:59Z"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Offer is currently active",
+            "example": true
+          }
+        }
+      },
+      "MapGoogleReview": {
+        "type": "object",
+        "description": "Google Review module configuration",
+        "required": [
+          "id",
+          "merchant_id",
+          "is_enabled",
+          "display_name",
+          "google_review_url",
+          "show_in_customer_dashboard",
+          "show_qr_code",
+          "is_configuration_complete",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Module identifier",
+            "example": "uuid-module"
+          },
+          "merchant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Associated merchant identifier",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "description": "Module is enabled",
+            "example": true
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display label for the module",
+            "example": "Avis Google"
+          },
+          "google_review_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Complete Google review URL for the merchant",
+            "example": "https://g.page/r/bakery-martin/review"
+          },
+          "show_in_customer_dashboard": {
+            "type": "boolean",
+            "description": "Show in customer dashboard",
+            "example": true
+          },
+          "show_qr_code": {
+            "type": "boolean",
+            "description": "Show QR code for rewards",
+            "example": true
+          },
+          "is_configuration_complete": {
+            "type": "boolean",
+            "description": "Module is fully configured and ready to use",
+            "example": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Module creation timestamp (ISO 8601)",
+            "example": "2026-04-19T12:00:00+00:00"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error code or type"
+          },
+          "message": {
+            "type": "string",
+            "description": "Detailed error message"
+          }
+        }
+      }
+    }
+  }
+}

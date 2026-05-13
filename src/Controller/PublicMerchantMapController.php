@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
+use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -25,6 +26,7 @@ final class PublicMerchantMapController extends AbstractController
 {
     public function __construct(
         private readonly MerchantRepository $merchantRepository,
+        private readonly CustomerRepository $customerRepository,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly EntityManagerInterface $entityManager,
         #[Autowire(service: 'limiter.public_map_view_limiter')]
@@ -127,6 +129,9 @@ final class PublicMerchantMapController extends AbstractController
                 ];
             }
 
+            // Count subscribers for social proof
+            $subscriberCount = $this->customerRepository->countByMerchant($merchant);
+
             $merchants[] = [
                 'id' => $merchantId,
                 'company_name' => $merchant->getCompanyName(),
@@ -138,6 +143,7 @@ final class PublicMerchantMapController extends AbstractController
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
+                'subscriber_count' => $subscriberCount,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,
