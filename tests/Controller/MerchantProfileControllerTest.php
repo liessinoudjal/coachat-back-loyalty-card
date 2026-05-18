@@ -195,6 +195,37 @@ class MerchantProfileControllerTest extends WebTestCase
         self::assertSame('accepted_terms_accepted_at must be a valid datetime', $payload['error']);
     }
 
+    public function testCreateMerchantWithEmptyEmailFallsBackToOwnerEmail(): void
+    {
+        $client = static::createClient();
+
+        $user = $this->createUser('create-empty-email');
+        $token = $this->createJwtFor($user);
+
+        $client->request(
+            'POST',
+            '/api/merchants',
+            server: [
+                'CONTENT_TYPE' => 'application/json',
+                'HTTP_AUTHORIZATION' => 'Bearer ' . $token,
+            ],
+            content: json_encode([
+                'company_name' => 'Invalid Email Shop',
+                'email' => '   ',
+                'postal_code' => '75000',
+                'city' => 'Paris',
+                'accepted_terms' => true,
+                'accepted_terms_version' => '2026-04-15',
+                'accepted_terms_accepted_at' => '2026-04-15T10:15:00Z',
+            ], JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(201);
+
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame($user->getEmail(), $payload['email']);
+    }
+
     public function testPartialUpdateMerchantProfile(): void
     {
         $client = static::createClient();

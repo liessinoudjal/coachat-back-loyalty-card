@@ -152,6 +152,26 @@ class MerchantRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return Merchant[]
+     */
+    public function findUnclaimedByEmail(string $email): array
+    {
+        $normalized = mb_strtolower(trim($email));
+        if ($normalized === '') {
+            return [];
+        }
+
+        return $this->createQueryBuilder('m')
+            ->where('m.user IS NULL')
+            ->andWhere('LOWER(m.email) = :email')
+            ->setParameter('email', $normalized)
+            ->orderBy('m.id', 'ASC')
+            ->setMaxResults(2)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * Search geocoded merchants by company name or full address text.
      *
      * @return array<int, array{

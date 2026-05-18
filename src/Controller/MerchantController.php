@@ -245,9 +245,23 @@ class MerchantController extends AbstractController
             return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
         }
 
+        $resolvedEmail = null;
+        if (array_key_exists('email', $data) && $data['email'] !== null) {
+            if (!is_string($data['email'])) {
+                return new JsonResponse(['error' => 'email must be a string'], 400);
+            }
+            $resolvedEmail = trim(mb_strtolower($data['email']));
+        }
+        if ($resolvedEmail === null || $resolvedEmail === '') {
+            $resolvedEmail = mb_strtolower((string) ($user->getEmail() ?? ''));
+        }
+        if ($resolvedEmail === '' || !filter_var($resolvedEmail, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email must be a valid non-empty email'], 422);
+        }
+
         $merchant = new Merchant();
         $merchant->setCompanyName(trim($data['company_name']));
-        $merchant->setEmail($data['email'] ?? $user->getEmail());
+        $merchant->setEmail($resolvedEmail);
         $merchant->setPhone($data['phone'] ?? null);
         $merchant->setAddress($data['address'] ?? null);
         $merchant->setPostalCode(trim($data['postal_code']));

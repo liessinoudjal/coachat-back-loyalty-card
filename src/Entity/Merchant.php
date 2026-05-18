@@ -65,7 +65,7 @@ class Merchant
     private string $subscriptionStatus = 'trial';
 
     #[ORM\OneToOne(inversedBy: 'merchant', cascade: ['persist', 'remove'])]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: true)]
     private ?User $user = null;
 
     #[ORM\OneToMany(targetEntity: LoyaltyProgram::class, mappedBy: 'merchant', orphanRemoval: true)]
@@ -138,7 +138,7 @@ class Merchant
         return $this->email;
     }
 
-    public function setEmail(string $email): static
+    public function setEmail(?string $email): static
     {
         $this->email = $email;
 
@@ -366,7 +366,7 @@ class Merchant
         return $this->user;
     }
 
-    public function setUser(User $user): static
+    public function setUser(?User $user): static
     {
         $this->user = $user;
 

@@ -30,12 +30,12 @@
     }
   ],
   "paths": {
-    "/public/merchants/map": {
+    "/public/wmcp/merchants/map": {
       "get": {
         "tags": ["Public"],
-        "summary": "Get merchants map",
-        "description": "Discover merchants with geolocation, loyalty programs, promotional offers, and Google Reviews configuration. Results are filtered by distance and search criteria.",
-        "operationId": "getMerchantsMap",
+        "summary": "Get claimed merchants map",
+        "description": "Discover claimed merchants only with geolocation, loyalty programs, promotional offers, and Google Reviews configuration. Unclaimed merchants are excluded.",
+        "operationId": "getWmcpClaimedMerchantsMap",
         "parameters": [
           {
             "name": "latitude",

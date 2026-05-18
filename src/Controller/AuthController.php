@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\User;
 use App\Entity\Merchant;
 use App\Exception\CustomerMerchantLimitReachedException;
+use App\Repository\MerchantRepository;
 use App\Repository\UserRepository;
 use App\Service\CustomerMerchantLinker;
 use App\Service\NotificationService;
@@ -173,18 +174,28 @@ class AuthController extends AbstractController
             $isSuperAdmin = $superAdminUser !== null || $this->isSuperAdminUser($user);
             $equipierMerchant = $this->resolveEquipierMerchant($user);
 
-            if ($this->isCustomerOnlyUser($user) && !$isSuperAdmin && $equipierMerchant === null) {
-                return new JsonResponse([
-                    'error' => 'account_already_customer',
-                    'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
-                ], 409);
+            if ($user->getMerchant() === null && $equipierMerchant === null) {
+                $claimedMerchant = $this->claimUnownedMerchantForEmail($user, (string) $googleUser->getEmail());
+                if ($claimedMerchant !== null) {
+                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    // Envoyer la notification de signup au merchant non-réclamé qui se connecte
+                    $this->signupAlertMailer->notifyMerchantSignup($claimedMerchant);
+                }
+                $equipierMerchant = $this->resolveEquipierMerchant($user);
+            }
+
+            $customer = $this->resolveCustomerForUser($user, $googleUser);
+            if ($customer !== null) {
+                $this->ensureUserRole($user, 'ROLE_CUSTOMER');
             }
 
             if ($user->getMerchant() === null && !$isSuperAdmin && $equipierMerchant === null) {
-                return new JsonResponse([
-                    'error' => 'merchant_not_found_for_login',
-                    'message' => 'No merchant account is linked to this Google account. Please register first.',
-                ], 403);
+                if (!$this->hasCustomerAccess($user, $customer)) {
+                    return new JsonResponse([
+                        'error' => 'merchant_not_found_for_login',
+                        'message' => 'No merchant account is linked to this Google account. Please register first.',
+                    ], 403);
+                }
             }
 
             if (!$isSuperAdmin) {
@@ -233,6 +244,22 @@ class AuthController extends AbstractController
         try {
             $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
             $user = $this->upsertGoogleUser($googleUser);
+            $this->syncGoogleIdentity($user, $googleUser);
+
+            if ($user->getMerchant() === null) {
+                $claimedMerchant = $this->claimUnownedMerchantForEmail($user, (string) $googleUser->getEmail());
+                if ($claimedMerchant !== null) {
+                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    $this->entityManager->persist($user);
+                    $this->entityManager->persist($claimedMerchant);
+                    $this->entityManager->flush();
+
+                    // Envoyer la notification de signup au merchant non-réclamé qui se connecte
+                    $this->signupAlertMailer->notifyMerchantSignup($claimedMerchant);
+
+                    return $this->buildAuthSuccessResponse($user);
+                }
+            }
 
             if ($this->isCustomerOnlyUser($user)) {
                 return new JsonResponse([
@@ -244,7 +271,7 @@ class AuthController extends AbstractController
             if ($user->getMerchant() !== null) {
                 return new JsonResponse([
                     'error' => 'account_already_merchant',
-                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
+                    'message' => 'Ce compte Google est déjà lié à un commerce (admin ou équipier). Pour créer un nouveau commerce, utilisez une autre adresse email Google non liée à un commerce.',
                 ], 409);
             }
 
@@ -800,6 +827,37 @@ class AuthController extends AbstractController
         }
 
         return $this->entityManager->getRepository(Merchant::class)->find($merchantId);
+    }
+
+    private function claimUnownedMerchantForEmail(User $user, string $email): ?Merchant
+    {
+        if ($user->getMerchant() !== null) {
+            return null;
+        }
+
+        /** @var MerchantRepository $merchantRepository */
+        $merchantRepository = $this->entityManager->getRepository(Merchant::class);
+        if (!method_exists($merchantRepository, 'findUnclaimedByEmail')) {
+            return null;
+        }
+
+        $matches = $merchantRepository->findUnclaimedByEmail($email);
+        if (!is_array($matches)) {
+            return null;
+        }
+
+        if (count($matches) === 0) {
+            return null;
+        }
+
+        if (count($matches) > 1) {
+            throw new \RuntimeException('Plusieurs commerces non réclamés ont le même email. Contactez le support pour finaliser le rattachement.');
+        }
+
+        $merchant = $matches[0];
+        $merchant->setUser($user);
+
+        return $merchant;
     }
 
     #[Route('/api/merchants/me', name: 'merchants_me', methods: ['GET'])]

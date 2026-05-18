@@ -46,6 +46,21 @@ final class PublicMerchantMapController extends AbstractController
     #[Route('/api/public/merchants/map', name: 'public_merchants_map', methods: ['GET'])]
     public function map(Request $request): JsonResponse
     {
+        return $this->buildMapResponse($request, false);
+    }
+
+    /**
+     * GET /api/public/wmcp/merchants/map
+     * WMCP-focused map endpoint: expose claimed merchants only.
+     */
+    #[Route('/api/public/wmcp/merchants/map', name: 'public_wmcp_merchants_map', methods: ['GET'])]
+    public function wmcpMap(Request $request): JsonResponse
+    {
+        return $this->buildMapResponse($request, true);
+    }
+
+    private function buildMapResponse(Request $request, bool $claimedOnly): JsonResponse
+    {
         // Rate limit by IP
         $limiter = $this->publicMapViewLimiter->create((string) $request->getClientIp());
         if (!$limiter->consume()->isAccepted()) {
@@ -95,33 +110,40 @@ final class PublicMerchantMapController extends AbstractController
                 continue;
             }
 
+            $isClaimed = $merchant->getUser() !== null;
+            if ($claimedOnly && !$isClaimed) {
+                continue;
+            }
+
             // --- Loyalty programs ---
             $loyaltyPrograms = [];
             $hasActiveLoyaltyProgram = false;
-            foreach ($merchant->getLoyaltyPrograms() as $program) {
-                if (!$program->isActive()) {
-                    continue;
-                }
-                $hasActiveLoyaltyProgram = true;
+            if ($isClaimed) {
+                foreach ($merchant->getLoyaltyPrograms() as $program) {
+                    if (!$program->isActive()) {
+                        continue;
+                    }
+                    $hasActiveLoyaltyProgram = true;
 
-                $loyaltyPrograms[] = [
-                    'id' => $program->getId(),
-                    'name' => $program->getName(),
-                    'type' => $program->getType()->value,
-                    'stamp_target' => $program->getStampTarget(),
-                    'points_target' => $program->getPointsTarget(),
-                    'reward_description' => $program->getRewardDescription(),
-                ];
+                    $loyaltyPrograms[] = [
+                        'id' => $program->getId(),
+                        'name' => $program->getName(),
+                        'type' => $program->getType()->value,
+                        'stamp_target' => $program->getStampTarget(),
+                        'points_target' => $program->getPointsTarget(),
+                        'reward_description' => $program->getRewardDescription(),
+                    ];
+                }
             }
 
             // --- Active promotional offers ---
-            $activeOffers = $this->collectActiveOffers($merchant, $today);
+            $activeOffers = $isClaimed ? $this->collectActiveOffers($merchant, $today) : [];
             $hasActiveOffer = count($activeOffers) > 0;
 
             // --- Google Review module ---
             $googleModule = $googleModulesByMerchant[$merchantId] ?? null;
             $googleReview = null;
-            if ($googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
+            if ($isClaimed && $googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
                 $googleReview = [
                     'is_enabled' => true,
                     'display_name' => $googleModule->getDisplayName(),
@@ -130,9 +152,9 @@ final class PublicMerchantMapController extends AbstractController
             }
 
             // Count subscribers for social proof
-            $subscriberCount = $this->customerRepository->countByMerchant($merchant);
+            $subscriberCount = $isClaimed ? $this->customerRepository->countByMerchant($merchant) : 0;
             $plan = $merchant->getPlan();
-            $customerSignupAvailable = $plan === null || $plan->getMaxCustomers() < 0 || $subscriberCount < $plan->getMaxCustomers();
+            $customerSignupAvailable = $isClaimed && ($plan === null || $plan->getMaxCustomers() < 0 || $subscriberCount < $plan->getMaxCustomers());
 
             $merchants[] = [
                 'id' => $merchantId,
@@ -147,6 +169,7 @@ final class PublicMerchantMapController extends AbstractController
                 'distance_km' => $row['distance_km'],
                 'subscriber_count' => $subscriberCount,
                 'customer_signup_available' => $customerSignupAvailable,
+                'is_claimed' => $isClaimed,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,
@@ -218,11 +241,12 @@ final class PublicMerchantMapController extends AbstractController
 
         $merchants = array_map(function (array $row) use ($merchantById, $today): array {
             $merchantEntity = $merchantById[$row['id']] ?? null;
+            $isClaimed = $merchantEntity instanceof Merchant && $merchantEntity->getUser() !== null;
             $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
-                ? $merchantEntity->getActiveLoyaltyProgramCount() > 0
+                ? ($isClaimed && $merchantEntity->getActiveLoyaltyProgramCount() > 0)
                 : false;
             $hasActiveOffers = $merchantEntity instanceof Merchant
-                ? count($this->collectActiveOffers($merchantEntity, $today)) > 0
+                ? ($isClaimed && count($this->collectActiveOffers($merchantEntity, $today)) > 0)
                 : false;
 
             return [
@@ -236,6 +260,7 @@ final class PublicMerchantMapController extends AbstractController
                 'distance_km' => $row['distance_km'],
                 'has_loyalty_programs' => $hasLoyaltyPrograms,
                 'has_active_promotional_offers' => $hasActiveOffers,
+                'is_claimed' => $isClaimed,
                 'subscribe_url' => sprintf('/?customer_signup=1&merchant_ref=%s&signup_type=landing_map', urlencode($row['id'])),
             ];
         }, $rows);
@@ -279,31 +304,35 @@ final class PublicMerchantMapController extends AbstractController
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
+        $isClaimed = $merchant->getUser() !== null;
+
         // --- Loyalty programs ---
         $loyaltyPrograms = [];
-        foreach ($merchant->getLoyaltyPrograms() as $program) {
-            if (!$program->isActive()) {
-                continue;
-            }
+        if ($isClaimed) {
+            foreach ($merchant->getLoyaltyPrograms() as $program) {
+                if (!$program->isActive()) {
+                    continue;
+                }
 
-            $loyaltyPrograms[] = [
-                'id' => $program->getId(),
-                'name' => $program->getName(),
-                'type' => $program->getType()->value,
-                'stamp_target' => $program->getStampTarget(),
-                'points_target' => $program->getPointsTarget(),
-                'reward_description' => $program->getRewardDescription(),
-            ];
+                $loyaltyPrograms[] = [
+                    'id' => $program->getId(),
+                    'name' => $program->getName(),
+                    'type' => $program->getType()->value,
+                    'stamp_target' => $program->getStampTarget(),
+                    'points_target' => $program->getPointsTarget(),
+                    'reward_description' => $program->getRewardDescription(),
+                ];
+            }
         }
 
         // --- Active promotional offers ---
         $today = new \DateTimeImmutable('today');
-        $activeOffers = $this->collectActiveOffers($merchant, $today);
+        $activeOffers = $isClaimed ? $this->collectActiveOffers($merchant, $today) : [];
 
         // --- Google Review module ---
         $googleModule = $this->googleReviewModuleRepository->findOneBy(['merchant' => $merchant]);
         $googleReview = null;
-        if ($googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
+        if ($isClaimed && $googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
             $googleReview = [
                 'is_enabled' => true,
                 'display_name' => $googleModule->getDisplayName(),
@@ -321,6 +350,7 @@ final class PublicMerchantMapController extends AbstractController
             'logo_url' => $merchant->getLogoUrl(),
             'latitude' => $merchant->getLatitude(),
             'longitude' => $merchant->getLongitude(),
+            'is_claimed' => $isClaimed,
             'loyalty_programs' => $loyaltyPrograms,
             'active_promotional_offers' => $activeOffers,
             'google_review' => $googleReview,
