@@ -52,6 +52,7 @@ class LoyaltyProgramController extends AbstractController
                 'stamp_target' => $program->getStampTarget(),
                 'reward_description' => $program->getRewardDescription(),
                 'is_active' => $program->isActive(),
+                'card_background_image_url' => $program->getCardBackgroundImageUrl(),
             ];
         }
 
@@ -113,6 +114,7 @@ class LoyaltyProgramController extends AbstractController
             'stamp_target' => $program->getStampTarget(),
             'reward_description' => $program->getRewardDescription(),
             'is_active' => $program->isActive(),
+            'card_background_image_url' => $program->getCardBackgroundImageUrl(),
         ], 201);
     }
 
@@ -170,6 +172,7 @@ class LoyaltyProgramController extends AbstractController
             'stamp_target' => $program->getStampTarget(),
             'reward_description' => $program->getRewardDescription(),
             'is_active' => $program->isActive(),
+            'card_background_image_url' => $program->getCardBackgroundImageUrl(),
         ]);
     }
     #[Route('/api/loyalty_programs/{id}', name: 'delete_loyalty_program', methods: ['DELETE'])]
@@ -196,6 +199,83 @@ class LoyaltyProgramController extends AbstractController
 
         // Suppression en cascade des cartes associées (orphanRemoval déjà activé)
         $this->entityManager->remove($program);
+        $this->entityManager->flush();
+
+        return new JsonResponse(['success' => true]);
+    }
+
+    #[Route('/api/loyalty_programs/{id}/background-image', name: 'upload_loyalty_program_background_image', methods: ['POST'])]
+    public function uploadBackgroundImage(int $id, Request $request): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$actorMerchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $program = $this->entityManager->getRepository(LoyaltyProgram::class)->find($id);
+        if (!$program || $program->getMerchant() !== $actorMerchant) {
+            return new JsonResponse(['error' => 'Program not found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!isset($data['background_image'])) {
+            return new JsonResponse(['error' => 'background_image required'], 400);
+        }
+
+        $backgroundImage = $data['background_image'];
+
+        // Validate format
+        if (!preg_match('/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+\/=\s]+)$/i', $backgroundImage, $matches)) {
+            return new JsonResponse(['error' => 'Format invalide. Formats acceptés: PNG, JPG, JPEG, WebP'], 400);
+        }
+
+        // Decode and validate size (5MB max)
+        $decodedImage = base64_decode(preg_replace('/\s+/', '', $matches[2]), true);
+        if (strlen($decodedImage) > 5242880) { // 5MB
+            return new JsonResponse(['error' => 'Fichier trop volumineux (max 5MB)'], 400);
+        }
+
+        $program->setCardBackgroundImageUrl($backgroundImage);
+        $this->entityManager->flush();
+
+        return new JsonResponse([
+            'success' => true,
+            'card_background_image_url' => $program->getCardBackgroundImageUrl(),
+        ]);
+    }
+
+    #[Route('/api/loyalty_programs/{id}/background-image', name: 'delete_loyalty_program_background_image', methods: ['DELETE'])]
+    public function deleteBackgroundImage(int $id): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user) {
+            return new JsonResponse(['error' => 'Unauthorized'], 401);
+        }
+
+        if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+            return new JsonResponse(['error' => 'Forbidden'], 403);
+        }
+
+        $actorMerchant = $this->resolveActorMerchant();
+        if (!$actorMerchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $program = $this->entityManager->getRepository(LoyaltyProgram::class)->find($id);
+        if (!$program || $program->getMerchant() !== $actorMerchant) {
+            return new JsonResponse(['error' => 'Program not found'], 404);
+        }
+
+        $program->setCardBackgroundImageUrl(null);
         $this->entityManager->flush();
 
         return new JsonResponse(['success' => true]);

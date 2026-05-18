@@ -41,6 +41,10 @@ class LoyaltyProgram
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $rewardDescription = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    #[SerializedName('card_background_image_url')]
+    private ?string $cardBackgroundImageUrl = null;
+
     #[ORM\Column]
     private bool $isActive = true;
 
@@ -145,6 +149,18 @@ class LoyaltyProgram
     public function setRewardDescription(?string $rewardDescription): static
     {
         $this->rewardDescription = $rewardDescription;
+
+        return $this;
+    }
+
+    public function getCardBackgroundImageUrl(): ?string
+    {
+        return $this->cardBackgroundImageUrl;
+    }
+
+    public function setCardBackgroundImageUrl(?string $cardBackgroundImageUrl): static
+    {
+        $this->cardBackgroundImageUrl = $cardBackgroundImageUrl;
 
         return $this;
     }
