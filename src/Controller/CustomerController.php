@@ -737,6 +737,7 @@ class CustomerController extends AbstractController
         $merchant = $card->getMerchant();
         $merchantId = $merchant?->getId()?->toRfc4122();
         $walletToken = $card->getWalletToken();
+        $program = $card->getLoyaltyProgram();
 
         return [
             'id' => $card->getId(),
@@ -751,10 +752,11 @@ class CustomerController extends AbstractController
                 'company_name' => $merchant->getCompanyName(),
                 'logo_url' => $merchant->getLogoUrl(),
             ] : null,
-            'loyalty_program' => $card->getLoyaltyProgram() ? [
-                'id' => $card->getLoyaltyProgram()->getId(),
-                'name' => $card->getLoyaltyProgram()->getName(),
-                'type' => $card->getLoyaltyProgram()->getType()->value,
+            'loyalty_program' => $program ? [
+                'id' => $program->getId(),
+                'name' => $program->getName(),
+                'type' => $program->getType()->value,
+                'card_background_image_url' => $program->getCardBackgroundImageUrl(),
             ] : null,
         ];
     }
