@@ -19,13 +19,11 @@ final class Version20260518184934 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $table = $schema->getTable('loyalty_program');
-        $table->addColumn('card_background_image_url', 'text', ['notnull' => false]);
+        $this->addSql('ALTER TABLE loyalty_program ADD COLUMN card_background_image_url LONGTEXT DEFAULT NULL');
     }
 
     public function down(Schema $schema): void
     {
-        $table = $schema->getTable('loyalty_program');
-        $table->dropColumn('card_background_image_url');
+        $this->addSql('ALTER TABLE loyalty_program DROP COLUMN card_background_image_url');
     }
 }
