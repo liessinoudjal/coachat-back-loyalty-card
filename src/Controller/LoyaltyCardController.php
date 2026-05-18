@@ -39,6 +39,7 @@ class LoyaltyCardController extends AbstractController
                 'id' => $card->getLoyaltyProgram()->getId(),
                 'name' => $card->getLoyaltyProgram()->getName(),
                 'type' => $card->getLoyaltyProgram()->getType()->value,
+                'card_background_image_url' => $card->getLoyaltyProgram()->getCardBackgroundImageUrl(),
             ],
             'customer' => $card->getCustomer() ? [
                 'id' => $card->getCustomer()->getId(),
