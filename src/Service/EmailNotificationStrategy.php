@@ -7,6 +7,8 @@ use App\Entity\Merchant;
 use App\Enum\LoyaltyProgramType;
 use App\Enum\NotificationType;
 use App\Repository\MerchantGoogleReviewModuleRepository;
+use App\Repository\GoogleReviewEventRepository;
+use App\Enum\GoogleReviewEventType;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Address;
@@ -21,6 +23,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly GoogleReviewUrlValidator $googleReviewUrlValidator,
         private readonly LoggerInterface $logger,
+        private readonly GoogleReviewEventRepository $googleReviewEventRepository,
         private readonly string $fromEmail,
         private readonly string $fromName,
     ) {
@@ -109,6 +112,21 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
      */
     private function buildEmailData(Merchant $merchant, Customer $customer, NotificationType $type, array $context): array
     {
+        // Suppress Google Review invite if OUTBOUND_CLICKED exists for this customer/merchant
+        $hasClickedGoogleReview = false;
+        try {
+            $event = $this->googleReviewEventRepository->findLatestOutboundClickedForCustomerAndMerchant($customer, $merchant);
+            $hasClickedGoogleReview = $event !== null;
+        } catch (\Throwable $e) {
+            $this->logger->error('Error checking OUTBOUND_CLICKED event for Google Review invite suppression', [
+                'customer_id' => $customer->getId()?->toRfc4122(),
+                'merchant_id' => $merchant->getId()?->toRfc4122(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
+        // Add suppression flag to context for Google Review invite
+        $context['show_google_review_invite'] = !$hasClickedGoogleReview;
+
         return match ($type) {
             NotificationType::CUSTOMER_SIGNUP => $this->buildCustomerSignupEmailData($merchant, $customer, $context),
             NotificationType::EQUIPIER_ASSIGNED => $this->buildEquipierAssignedEmailData($merchant, $customer, $context),

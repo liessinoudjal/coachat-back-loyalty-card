@@ -188,9 +188,21 @@ class AuthController extends AbstractController
             }
 
             if (!$isSuperAdmin) {
-                if ($user->getMerchant() !== null || $equipierMerchant !== null) {
-                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                if ($user->getMerchant() !== null) {
+                    // Owner merchant — must have ROLE_MERCHANT
+                    if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+                        $this->logger->error('Merchant owner is missing ROLE_MERCHANT in database — auto-correcting. This indicates a data integrity issue.', [
+                            'user_id' => $user->getId(),
+                            'email' => $user->getEmail(),
+                            'merchant_id' => $user->getMerchant()->getId()?->toRfc4122(),
+                        ]);
+                        $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    }
+                } elseif ($equipierMerchant !== null && in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+                    // Equipier admin — preserve ROLE_MERCHANT (permission to manage staff)
+                    // Do nothing; role is already correct in base
                 } else {
+                    // Pure customer or equipier (no merchant relation) — must not have ROLE_MERCHANT
                     $this->removeUserRole($user, 'ROLE_MERCHANT');
                 }
             }

@@ -4,13 +4,16 @@ namespace App\Controller;
 
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
+use App\Entity\GoogleReviewEvent;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
+use App\Enum\GoogleReviewEventType;
 use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\PromotionalOfferRepository;
 use App\Service\CustomerMerchantLinker;
+use App\Service\GoogleReviewJourneyService;
 use App\Service\NotificationService;
 use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
@@ -26,18 +29,21 @@ class CustomerController extends AbstractController
     private $notificationService;
     private $customerMerchantLinker;
     private $signupAlertMailer;
+    private $googleReviewJourneyService;
 
     public function __construct(
         EntityManagerInterface $entityManager,
         NotificationService $notificationService,
         CustomerMerchantLinker $customerMerchantLinker,
         SignupAlertMailer $signupAlertMailer,
+        GoogleReviewJourneyService $googleReviewJourneyService,
     )
     {
         $this->entityManager = $entityManager;
         $this->notificationService = $notificationService;
         $this->customerMerchantLinker = $customerMerchantLinker;
         $this->signupAlertMailer = $signupAlertMailer;
+        $this->googleReviewJourneyService = $googleReviewJourneyService;
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
@@ -563,7 +569,7 @@ class CustomerController extends AbstractController
         }
 
         return new JsonResponse([
-            ...$this->formatMerchantCustomer($customer),
+            ...$this->formatMerchantCustomerDetail($customer, $merchant),
         ]);
     }
 
@@ -781,6 +787,50 @@ class CustomerController extends AbstractController
             'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
             'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
             'roles' => $customer->getUser()?->getRoles() ?? ['ROLE_CUSTOMER'],
+        ];
+    }
+
+    private function formatMerchantCustomerDetail(Customer $customer, Merchant $merchant): array
+    {
+        $notificationPreference = $this->entityManager
+            ->getRepository(CustomerMerchantNotificationPreference::class)
+            ->findOneByCustomerAndMerchant($customer, $merchant);
+
+        /** @var GoogleReviewEvent|null $latestGoogleReviewClick */
+        $latestGoogleReviewClick = $this->entityManager
+            ->getRepository(GoogleReviewEvent::class)
+            ->findOneBy(
+                [
+                    'customer' => $customer,
+                    'merchant' => $merchant,
+                    'eventType' => GoogleReviewEventType::OUTBOUND_CLICKED,
+                ],
+                ['createdAt' => 'DESC'],
+            );
+
+        $latestGoogleReviewReward = $this->googleReviewJourneyService
+            ->getCurrentRewardForCustomerAndMerchant($customer, $merchant);
+
+        return [
+            ...$this->formatMerchantCustomer($customer),
+            'notifications' => $this->formatNotificationPreference($merchant, $notificationPreference),
+            'google_review' => [
+                'has_clicked_review_link' => $latestGoogleReviewClick instanceof GoogleReviewEvent,
+                'last_review_click_at' => $latestGoogleReviewClick?->getCreatedAt()?->format(DATE_ATOM),
+                'latest_reward' => $latestGoogleReviewReward ? [
+                    'status' => $latestGoogleReviewReward->getStatus()->value,
+                    'label' => $latestGoogleReviewReward->getRewardLabel(),
+                    'description' => $latestGoogleReviewReward->getRewardDescription(),
+                    'created_at' => $latestGoogleReviewReward->getCreatedAt()?->format(DATE_ATOM),
+                    'redeemed_at' => $latestGoogleReviewReward->getRedeemedAt()?->format(DATE_ATOM),
+                    'expires_at' => $latestGoogleReviewReward->getExpiresAt()?->format(DATE_ATOM),
+                ] : null,
+            ],
+            'terms' => [
+                'accepted' => $customer->isAcceptedTerms(),
+                'accepted_version' => $customer->getAcceptedTermsVersion(),
+                'accepted_at' => $customer->getAcceptedTermsAcceptedAt()?->format(DATE_ATOM),
+            ],
         ];
     }
 
