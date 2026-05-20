@@ -34,6 +34,10 @@ class AppFixtures extends Fixture implements DependentFixtureInterface
         $merchant->setTrialEndsAt((new \DateTime())->add(new \DateInterval('P30D')));
         $merchant->setPlan($freePlan);
         $merchant->setUser($user);
+        $merchant->setAddress('3 rue des carmes');
+        $merchant->setCity('Orléans');
+        $merchant->setPostalCode('45000');
+
 
         $manager->persist($merchant);
         $manager->flush();
