@@ -14,10 +14,12 @@ use App\Entity\User;
 use App\Repository\LoyaltyProgramRepository;
 use App\Repository\MerchantAssetDownloadEventRepository;
 use App\Repository\MerchantRepository;
+use App\Repository\PlanRepository;
 use App\Service\GoogleReviewModuleManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
 class SuperAdminController extends AbstractController
@@ -28,6 +30,7 @@ class SuperAdminController extends AbstractController
         private readonly GoogleReviewModuleManager $googleReviewModuleManager,
         private readonly EntityManagerInterface $em,
         private readonly MerchantAssetDownloadEventRepository $assetDownloadEventRepository,
+        private readonly PlanRepository $planRepository,
     ) {
     }
 
@@ -63,6 +66,142 @@ class SuperAdminController extends AbstractController
             'items' => array_map(fn (Merchant $merchant): array => $this->formatMerchant($merchant), $merchants),
             'total' => count($merchants),
         ]);
+    }
+
+    #[Route('/api/super-admin/merchants', name: 'super_admin_merchants_create_unclaimed', methods: ['POST'])]
+    public function createUnclaimedMerchant(Request $request): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'invalid_payload'], 400);
+        }
+
+        $companyName = trim((string) ($data['company_name'] ?? ''));
+        $rawEmail = trim((string) ($data['email'] ?? ''));
+        $email = $rawEmail !== '' ? mb_strtolower($rawEmail) : null;
+        $address = trim((string) ($data['address'] ?? ''));
+        $postalCode = trim((string) ($data['postal_code'] ?? ''));
+        $city = trim((string) ($data['city'] ?? ''));
+        $phone = isset($data['phone']) && $data['phone'] !== null ? trim((string) $data['phone']) : null;
+
+        if ($companyName === '') {
+            return new JsonResponse(['error' => 'company_name_required'], 422);
+        }
+        if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email_invalid'], 422);
+        }
+        if ($address === '') {
+            return new JsonResponse(['error' => 'address_required'], 422);
+        }
+        if ($postalCode === '') {
+            return new JsonResponse(['error' => 'postal_code_required'], 422);
+        }
+        if ($city === '') {
+            return new JsonResponse(['error' => 'city_required'], 422);
+        }
+
+        if ($email !== null) {
+            $existingByEmail = $this->em->createQueryBuilder()
+                ->select('m.id')
+                ->from(Merchant::class, 'm')
+                ->where('LOWER(m.email) = :email')
+                ->setParameter('email', $email)
+                ->setMaxResults(1)
+                ->getQuery()
+                ->getOneOrNullResult();
+
+            if ($existingByEmail !== null) {
+                return new JsonResponse([
+                    'error' => 'merchant_email_already_exists',
+                    'message' => 'Un commerce avec cet email existe déjà.',
+                ], 409);
+            }
+        }
+
+        $merchant = new Merchant();
+        $merchant->setCompanyName($companyName);
+        $merchant->setEmail($email);
+        $merchant->setPhone($phone !== '' ? $phone : null);
+        $merchant->setAddress($address);
+        $merchant->setPostalCode($postalCode);
+        $merchant->setCity($city);
+        $merchant->setSubscriptionStatus((string) ($data['subscription_status'] ?? 'trial'));
+        $merchant->setAcceptedTerms(false);
+        $merchant->setAcceptedTermsVersion(null);
+        $merchant->setAcceptedTermsAcceptedAt(null);
+
+        $freePlan = $this->planRepository->findBySlug('free');
+        if ($freePlan !== null) {
+            $merchant->setPlan($freePlan);
+        }
+
+        $this->em->persist($merchant);
+        $this->em->flush();
+
+        return new JsonResponse($this->formatMerchant($merchant), 201);
+    }
+
+    #[Route('/api/super-admin/merchants/{merchantId}/claim-email', name: 'super_admin_merchants_set_claim_email', methods: ['PUT'])]
+    public function setMerchantClaimEmail(string $merchantId, Request $request): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $merchant = $this->merchantRepository->find($merchantId);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return new JsonResponse(['error' => 'invalid_payload'], 400);
+        }
+
+        $rawEmail = trim((string) ($data['email'] ?? ''));
+        if ($rawEmail === '') {
+            if ($merchant->getUser() !== null) {
+                return new JsonResponse([
+                    'error' => 'claimed_merchant_email_required',
+                    'message' => 'Impossible de vider l\'email d\'un commerce déjà réclamé.',
+                ], 409);
+            }
+
+            $merchant->setEmail(null);
+            $this->em->persist($merchant);
+            $this->em->flush();
+
+            return new JsonResponse($this->formatMerchant($merchant));
+        }
+
+        $email = mb_strtolower($rawEmail);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email_invalid'], 422);
+        }
+
+        $existingByEmail = $this->em->createQueryBuilder()
+            ->select('m.id')
+            ->from(Merchant::class, 'm')
+            ->where('LOWER(m.email) = :email')
+            ->andWhere('m.id != :merchantId')
+            ->setParameter('email', $email)
+            ->setParameter('merchantId', $merchant->getId(), 'uuid')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+
+        if ($existingByEmail !== null) {
+            return new JsonResponse([
+                'error' => 'merchant_email_already_exists',
+                'message' => 'Un commerce avec cet email existe déjà.',
+            ], 409);
+        }
+
+        $merchant->setEmail($email);
+        $this->em->persist($merchant);
+        $this->em->flush();
+
+        return new JsonResponse($this->formatMerchant($merchant));
     }
 
     #[Route('/api/super-admin/merchants/{merchantId}/loyalty-programs', name: 'super_admin_merchant_loyalty_programs', methods: ['GET'])]
@@ -278,6 +417,75 @@ class SuperAdminController extends AbstractController
         ]);
     }
 
+    #[Route('/api/super-admin/merchants/{merchantId}/free-account', name: 'super_admin_merchants_set_free_account', methods: ['PATCH'])]
+    public function setMerchantFreeAccount(string $merchantId, Request $request): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $merchant = $this->merchantRepository->find($merchantId);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data) || !array_key_exists('enabled', $data)) {
+            return new JsonResponse(['error' => 'enabled_required'], 422);
+        }
+
+        $enabled = (bool) $data['enabled'];
+        $currentUser = $this->getUser();
+
+        $merchant->setIsFreeAccount($enabled);
+        if ($enabled) {
+            $merchant->setFreeAccountGrantedAt(new \DateTime());
+            $merchant->setFreeAccountGrantedBy($currentUser instanceof User ? $currentUser : null);
+        } else {
+            $merchant->setFreeAccountGrantedAt(null);
+            $merchant->setFreeAccountGrantedBy(null);
+        }
+
+        $this->em->persist($merchant);
+        $this->em->flush();
+
+        return new JsonResponse($this->formatMerchant($merchant));
+    }
+
+    #[Route('/api/super-admin/merchants/{merchantId}', name: 'super_admin_merchants_delete', methods: ['DELETE'])]
+    public function deleteMerchant(string $merchantId): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $merchant = $this->merchantRepository->find($merchantId);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $merchantName = $merchant->getCompanyName();
+        $merchantEmail = $merchant->getEmail() ?? $merchant->getUser()?->getEmail() ?? 'n/a';
+
+        // Détacher le user si le merchant est réclamé
+        if ($merchant->getUser() instanceof User) {
+            $user = $merchant->getUser();
+            $merchant->setUser(null);
+            // Garder le user mais détacher son merchant
+            $this->em->persist($merchant);
+            $this->em->persist($user);
+        }
+
+        // Supprimer le merchant
+        $this->em->remove($merchant);
+        $this->em->flush();
+
+        return new JsonResponse([
+            'message' => 'Merchant deleted successfully',
+            'merchant' => [
+                'id' => $merchantId,
+                'company_name' => $merchantName,
+                'email' => $merchantEmail,
+            ],
+        ], 200);
+    }
+
     private function formatMerchant(Merchant $merchant): array
     {
         $user = $merchant->getUser();
@@ -316,11 +524,19 @@ class SuperAdminController extends AbstractController
                 'has_push_notifications' => $plan->isHasPushNotifications(),
                 'has_advanced_stats' => $plan->isHasAdvancedStats(),
             ] : null,
+            'is_claimed' => $user !== null,
             'user' => $user ? [
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
                 'roles' => $user->getRoles(),
+            ] : null,
+            'is_free_account' => $merchant->isFreeAccount(),
+            'free_account_granted_at' => $merchant->getFreeAccountGrantedAt()?->format('Y-m-d\TH:i:s\Z'),
+            'free_account_granted_by' => $merchant->getFreeAccountGrantedBy() ? [
+                'id' => $merchant->getFreeAccountGrantedBy()->getId(),
+                'email' => $merchant->getFreeAccountGrantedBy()->getEmail(),
+                'name' => $merchant->getFreeAccountGrantedBy()->getName(),
             ] : null,
         ];
     }

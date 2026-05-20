@@ -1,0 +1,46 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ name|default('') }},</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:20px;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Confirmation requise</div>
+                <div style="font-size:16px; line-height:1.6; color:#111827;">
+                    Merci de votre inscription sur Coachat. Pour activer votre compte et accéder à votre espace,
+                    veuillez confirmer votre adresse email en cliquant sur le bouton ci-dessous.
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin: 20px 0 24px 0;">
+        <tr>
+            <td align="center">
+                <a href="{{ verify_url }}"
+                   style="display:inline-block; padding:14px 28px; background-color:#111827; color:#ffffff !important;
+                          font-weight:600; font-size:16px; text-decoration:none; border-radius:10px;">
+                    Confirmer mon adresse email
+                </a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="font-size:14px; line-height:1.6; color:#374151; margin-bottom:12px;">
+        Si le bouton ne fonctionne pas, copiez-collez ce lien dans votre navigateur :
+    </div>
+    <div style="font-size:13px; line-height:1.5; color:#2563eb; word-break:break-all; margin-bottom:18px;">
+        <a href="{{ verify_url }}" style="color:#2563eb;">{{ verify_url }}</a>
+    </div>
+
+    <div style="font-size:13px; line-height:1.6; color:#6b7280; margin-top:18px;">
+        Ce lien est valable 24 heures. Si vous n'êtes pas à l'origine de cette inscription,
+        vous pouvez ignorer ce message en toute sécurité.
+    </div>
+
+    <div style="font-size:14px; line-height:1.6; color:#111827; margin-top:24px;">
+        À très bientôt,<br>
+        <strong>L'équipe Coachat</strong>
+    </div>
+{% endblock %}

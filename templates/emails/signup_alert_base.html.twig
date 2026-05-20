@@ -133,6 +133,22 @@
                                     <td style="padding:8px 20px 22px 20px;">
                                         {% block email_body %}{% endblock %}
 
+                                        {% if cta_url|default(null) %}
+                                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:18px;">
+                                                <tr>
+                                                    <td style="padding:16px; border:1px solid #dbeafe; background-color:#eff6ff; border-radius:14px;">
+                                                        <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#1d4ed8; margin-bottom:8px;">{{ cta_label|default('Accès rapide') }}</div>
+                                                        <div style="font-size:15px; line-height:1.6; color:#1e3a8a; margin-bottom:12px;">
+                                                            {{ cta_text|default('Gérez votre abonnement depuis votre dashboard.') }}
+                                                        </div>
+                                                        <a href="{{ cta_url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:700;">
+                                                            {{ cta_label|default('Ouvrir mon dashboard') }}
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        {% endif %}
+
                                         {% if show_google_review_invite|default(false) and google_review_url|default(null) %}
                                             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:18px;">
                                                 <tr>

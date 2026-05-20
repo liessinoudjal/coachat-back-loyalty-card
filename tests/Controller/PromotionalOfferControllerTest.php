@@ -10,6 +10,7 @@ use App\Service\PromotionalOfferNotificationDispatcher;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Request;
 
 final class PromotionalOfferControllerTest extends TestCase
@@ -134,6 +135,7 @@ final class PromotionalOfferControllerTest extends TestCase
             $entityManager,
             $offerRepository,
             $dispatcher,
+            $this->createMock(LoggerInterface::class),
             $cronToken,
             $cronBasicUser,
             $cronBasicPassword,

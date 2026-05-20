@@ -5,8 +5,11 @@ namespace App\Controller;
 use App\Entity\Customer;
 use App\Entity\User;
 use App\Entity\Merchant;
+use App\Exception\CustomerMerchantLimitReachedException;
+use App\Repository\MerchantRepository;
 use App\Repository\UserRepository;
 use App\Service\CustomerMerchantLinker;
+use App\Service\EmailVerificationService;
 use App\Service\NotificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
@@ -19,6 +22,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Uid\Uuid;
 
@@ -32,6 +36,8 @@ class AuthController extends AbstractController
     private $signupAlertMailer;
     private $notificationService;
     private $customerMerchantLinker;
+    private $passwordHasher;
+    private EmailVerificationService $emailVerificationService;
 
     public function __construct(
         EntityManagerInterface $entityManager,
@@ -41,7 +47,9 @@ class AuthController extends AbstractController
         LoggerInterface $logger,
         SignupAlertMailer $signupAlertMailer,
         NotificationService $notificationService,
-        CustomerMerchantLinker $customerMerchantLinker
+        CustomerMerchantLinker $customerMerchantLinker,
+        UserPasswordHasherInterface $passwordHasher,
+        EmailVerificationService $emailVerificationService
     ) {
         $this->entityManager = $entityManager;
         $this->jwtManager = $jwtManager;
@@ -51,6 +59,288 @@ class AuthController extends AbstractController
         $this->signupAlertMailer = $signupAlertMailer;
         $this->notificationService = $notificationService;
         $this->customerMerchantLinker = $customerMerchantLinker;
+        $this->passwordHasher = $passwordHasher;
+        $this->emailVerificationService = $emailVerificationService;
+    }
+
+    #[Route('/api/auth/merchant/register-form', name: 'auth_merchant_register_form', methods: ['POST'])]
+    public function merchantRegisterForm(Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $name = trim((string) (($data['name'] ?? '')));
+        $email = $this->normalizeEmail((string) (($data['email'] ?? '')));
+        $password = (string) (($data['password'] ?? ''));
+
+        if ($name === '' || $email === '' || $password === '') {
+            return new JsonResponse(['error' => 'missing_required_fields'], 422);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email_invalid'], 422);
+        }
+
+        if (mb_strlen($password) < 8) {
+            return new JsonResponse(['error' => 'password_too_short'], 422);
+        }
+
+        $existingUser = $this->findUserByEmail($email);
+        if ($existingUser instanceof User) {
+            if ($existingUser->getGoogleId() !== null && $existingUser->getPassword() === null) {
+                return new JsonResponse([
+                    'error' => 'account_exists_with_google',
+                    'message' => 'This email is already associated with a Google account. Use Google login instead.',
+                ], 409);
+            }
+
+            if ($this->isMerchantLinkedUser($existingUser)) {
+                return new JsonResponse([
+                    'error' => 'account_already_merchant',
+                    'message' => 'This email is already linked to a merchant account. Use merchant login.',
+                ], 409);
+            }
+
+            if ($existingUser->getCustomer() instanceof Customer) {
+                return new JsonResponse([
+                    'error' => 'account_already_customer',
+                    'message' => 'This email is already linked to a customer account. Use customer login.',
+                ], 409);
+            }
+
+            return new JsonResponse(['error' => 'account_already_exists'], 409);
+        }
+
+        $user = new User();
+        $user->setEmail($email);
+        $user->setName($name);
+        $user->setRoles(['ROLE_MERCHANT']);
+        $user->setPassword($this->passwordHasher->hashPassword($user, $password));
+        $user->setEmailVerified(false);
+
+        $this->entityManager->persist($user);
+        $this->entityManager->flush();
+
+        $this->emailVerificationService->issueAndSendVerification($user, 'merchant');
+
+        return $this->buildAuthSuccessResponse($user);
+    }
+
+    /**
+     * Unified password login endpoint for all roles (merchant, customer, super-admin).
+     *
+     * Accepts an optional `merchant_ref` so that a customer scanning a merchant
+     * QR code can be linked to that merchant during login (replaces the
+     * decommissioned /auth/customer/login-form endpoint).
+     */
+    #[Route('/api/auth/merchant/login-form', name: 'auth_merchant_login_form', methods: ['POST'])]
+    public function merchantLoginForm(Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $email = $this->normalizeEmail((string) (($data['email'] ?? '')));
+        $password = (string) (($data['password'] ?? ''));
+        $merchantRef = trim((string) (($data['merchant_ref'] ?? '')));
+
+        if ($email === '' || $password === '') {
+            return new JsonResponse(['error' => 'missing_required_fields'], 422);
+        }
+
+        $user = $this->findUserByEmail($email);
+        if (!$user instanceof User) {
+            return new JsonResponse(['error' => 'invalid_credentials'], 401);
+        }
+
+        if ($user->getPassword() === null) {
+            if ($user->getGoogleId() !== null) {
+                return new JsonResponse([
+                    'error' => 'use_google_login',
+                    'message' => 'This account is configured with Google sign-in. Use Google login.',
+                ], 409);
+            }
+
+            return new JsonResponse(['error' => 'invalid_credentials'], 401);
+        }
+
+        if (!$this->passwordHasher->isPasswordValid($user, $password)) {
+            return new JsonResponse(['error' => 'invalid_credentials'], 401);
+        }
+
+        $isSuperAdmin = $this->isSuperAdminUser($user);
+        $isMerchantLinked = $this->isMerchantLinkedUser($user) || in_array('ROLE_MERCHANT', $user->getRoles(), true);
+
+        // Merchant / super-admin path — merchant_ref is ignored here.
+        if ($isSuperAdmin || $isMerchantLinked) {
+            return $this->buildAuthSuccessResponse($user);
+        }
+
+        // Customer path (formerly handled by /api/auth/customer/login-form).
+        $customer = $this->resolveCustomerForPasswordUser($user);
+        if (!$customer instanceof Customer || !$this->hasCustomerAccess($user, $customer)) {
+            return new JsonResponse([
+                'error' => 'account_not_linked',
+                'message' => 'Aucun compte commerçant ou client n\'est lié à cet email. Veuillez créer un compte.',
+            ], 403);
+        }
+
+        $linkedMerchant = null;
+        $isNewMerchantLink = false;
+        if ($merchantRef !== '') {
+            $linkedMerchant = $this->resolveMerchantByRef($merchantRef);
+            if ($linkedMerchant === null) {
+                return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
+            }
+            if ($linkedMerchant->getSubscriptionStatus() === 'canceled' && !$linkedMerchant->isFreeAccount()) {
+                return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
+            }
+
+            try {
+                $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $linkedMerchant);
+            } catch (CustomerMerchantLimitReachedException $exception) {
+                $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                    $linkedMerchant,
+                    $customer,
+                    $exception->getCurrentCustomers(),
+                    $exception->getMaxCustomers(),
+                    'parcours connexion formulaire',
+                );
+
+                return new JsonResponse([
+                    'error' => $exception->getMessage(),
+                    'message' => sprintf(
+                        'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                        $exception->getMaxCustomers(),
+                    ),
+                    'current_customers' => $exception->getCurrentCustomers(),
+                    'max_customers' => $exception->getMaxCustomers(),
+                ], 409);
+            }
+        }
+
+        $this->ensureUserRole($user, 'ROLE_CUSTOMER');
+        $this->entityManager->persist($user);
+        $this->entityManager->persist($customer);
+        $this->entityManager->flush();
+
+        if ($isNewMerchantLink && $linkedMerchant instanceof Merchant) {
+            $this->signupAlertMailer->notifyCustomerSignup($customer, $linkedMerchant);
+            $this->notificationService->notifyCustomerSignup($customer, $linkedMerchant);
+        }
+
+        return $this->buildCustomerAuthSuccessResponse($user, $customer, $linkedMerchant);
+    }
+
+    #[Route('/api/auth/customer/register-form', name: 'auth_customer_register_form', methods: ['POST'])]
+    public function customerRegisterForm(Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $name = trim((string) (($data['name'] ?? '')));
+        $email = $this->normalizeEmail((string) (($data['email'] ?? '')));
+        $password = (string) (($data['password'] ?? ''));
+        $merchantRef = trim((string) (($data['merchant_ref'] ?? '')));
+        $acceptedTerms = (bool) (($data['accepted_terms'] ?? false));
+        $acceptedTermsVersion = trim((string) (($data['accepted_terms_version'] ?? '')));
+        $acceptedTermsAcceptedAt = isset($data['accepted_terms_accepted_at'])
+            ? new \DateTime((string) $data['accepted_terms_accepted_at'])
+            : null;
+
+        if ($name === '' || $email === '' || $password === '' || $merchantRef === '') {
+            return new JsonResponse(['error' => 'missing_required_fields'], 422);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email_invalid'], 422);
+        }
+
+        if (mb_strlen($password) < 8) {
+            return new JsonResponse(['error' => 'password_too_short'], 422);
+        }
+
+        if (!$acceptedTerms || $acceptedTermsVersion === '' || !$acceptedTermsAcceptedAt instanceof \DateTimeInterface) {
+            return new JsonResponse(['error' => 'accepted_terms_required'], 422);
+        }
+
+        $merchant = $this->resolveMerchantByRef($merchantRef);
+        if ($merchant === null) {
+            return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
+        }
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
+            return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
+        }
+
+        $existingUser = $this->findUserByEmail($email);
+        if ($existingUser instanceof User) {
+            if ($existingUser->getGoogleId() !== null && $existingUser->getPassword() === null) {
+                return new JsonResponse([
+                    'error' => 'account_exists_with_google',
+                    'message' => 'This email is already associated with a Google customer account. Use Google login instead.',
+                ], 409);
+            }
+
+            if ($this->isMerchantLinkedUser($existingUser)) {
+                return new JsonResponse([
+                    'error' => 'account_already_merchant',
+                    'message' => 'This email is already linked to a merchant account. Use merchant login.',
+                ], 409);
+            }
+
+            if ($existingUser->getCustomer() instanceof Customer) {
+                return new JsonResponse([
+                    'error' => 'account_already_customer',
+                    'message' => 'This email is already linked to a customer account. Use customer login.',
+                ], 409);
+            }
+
+            return new JsonResponse(['error' => 'account_already_exists'], 409);
+        }
+
+        $user = new User();
+        $user->setEmail($email);
+        $user->setName($name);
+        $user->setRoles(['ROLE_CUSTOMER']);
+        $user->setPassword($this->passwordHasher->hashPassword($user, $password));
+        $user->setEmailVerified(false);
+
+        $customer = new Customer();
+        $customer->setName($name);
+        $customer->setEmail($email);
+        $customer->setUser($user);
+        $customer->setAcceptedTerms(true);
+        $customer->setAcceptedTermsVersion($acceptedTermsVersion);
+        $customer->setAcceptedTermsAcceptedAt($acceptedTermsAcceptedAt);
+
+        try {
+            $this->customerMerchantLinker->link($customer, $merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                null,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'parcours inscription formulaire',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
+
+        $this->entityManager->persist($user);
+        $this->entityManager->persist($customer);
+        $this->entityManager->flush();
+
+        // Issue verification token (no dedicated email sent) and embed the
+        // verify URL into the customer welcome email to avoid sending two
+        // separate emails on signup.
+        $verifyUrl = $this->emailVerificationService->issueTokenAndBuildUrl($user);
+
+        $this->signupAlertMailer->notifyCustomerSignup($customer, $merchant);
+        $this->notificationService->notifyCustomerSignup($customer, $merchant, $verifyUrl);
+
+        return $this->buildCustomerAuthSuccessResponse($user, $customer, $merchant);
     }
 
     #[Route('/api/auth/google', name: 'auth_google', methods: ['GET'])]
@@ -172,24 +462,46 @@ class AuthController extends AbstractController
             $isSuperAdmin = $superAdminUser !== null || $this->isSuperAdminUser($user);
             $equipierMerchant = $this->resolveEquipierMerchant($user);
 
-            if ($this->isCustomerOnlyUser($user) && !$isSuperAdmin && $equipierMerchant === null) {
-                return new JsonResponse([
-                    'error' => 'account_already_customer',
-                    'message' => 'This Google account is already linked to a customer profile. Use customer login flow.',
-                ], 409);
+            if ($user->getMerchant() === null && $equipierMerchant === null) {
+                $claimedMerchant = $this->claimUnownedMerchantForEmail($user, (string) $googleUser->getEmail());
+                if ($claimedMerchant !== null) {
+                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    // Envoyer la notification de signup au merchant non-réclamé qui se connecte
+                    $this->signupAlertMailer->notifyMerchantSignup($claimedMerchant);
+                }
+                $equipierMerchant = $this->resolveEquipierMerchant($user);
+            }
+
+            $customer = $this->resolveCustomerForUser($user, $googleUser);
+            if ($customer !== null) {
+                $this->ensureUserRole($user, 'ROLE_CUSTOMER');
             }
 
             if ($user->getMerchant() === null && !$isSuperAdmin && $equipierMerchant === null) {
-                return new JsonResponse([
-                    'error' => 'merchant_not_found_for_login',
-                    'message' => 'No merchant account is linked to this Google account. Please register first.',
-                ], 403);
+                if (!$this->hasCustomerAccess($user, $customer)) {
+                    return new JsonResponse([
+                        'error' => 'merchant_not_found_for_login',
+                        'message' => 'No merchant account is linked to this Google account. Please register first.',
+                    ], 403);
+                }
             }
 
             if (!$isSuperAdmin) {
-                if ($user->getMerchant() !== null || $equipierMerchant !== null) {
-                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                if ($user->getMerchant() !== null) {
+                    // Owner merchant — must have ROLE_MERCHANT
+                    if (!in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+                        $this->logger->error('Merchant owner is missing ROLE_MERCHANT in database — auto-correcting. This indicates a data integrity issue.', [
+                            'user_id' => $user->getId(),
+                            'email' => $user->getEmail(),
+                            'merchant_id' => $user->getMerchant()->getId()?->toRfc4122(),
+                        ]);
+                        $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    }
+                } elseif ($equipierMerchant !== null && in_array('ROLE_MERCHANT', $user->getRoles(), true)) {
+                    // Equipier admin — preserve ROLE_MERCHANT (permission to manage staff)
+                    // Do nothing; role is already correct in base
                 } else {
+                    // Pure customer or equipier (no merchant relation) — must not have ROLE_MERCHANT
                     $this->removeUserRole($user, 'ROLE_MERCHANT');
                 }
             }
@@ -220,6 +532,22 @@ class AuthController extends AbstractController
         try {
             $googleUser = $this->fetchGoogleUserFromCode($code, $redirectUri);
             $user = $this->upsertGoogleUser($googleUser);
+            $this->syncGoogleIdentity($user, $googleUser);
+
+            if ($user->getMerchant() === null) {
+                $claimedMerchant = $this->claimUnownedMerchantForEmail($user, (string) $googleUser->getEmail());
+                if ($claimedMerchant !== null) {
+                    $this->ensureUserRole($user, 'ROLE_MERCHANT');
+                    $this->entityManager->persist($user);
+                    $this->entityManager->persist($claimedMerchant);
+                    $this->entityManager->flush();
+
+                    // Envoyer la notification de signup au merchant non-réclamé qui se connecte
+                    $this->signupAlertMailer->notifyMerchantSignup($claimedMerchant);
+
+                    return $this->buildAuthSuccessResponse($user);
+                }
+            }
 
             if ($this->isCustomerOnlyUser($user)) {
                 return new JsonResponse([
@@ -231,7 +559,7 @@ class AuthController extends AbstractController
             if ($user->getMerchant() !== null) {
                 return new JsonResponse([
                     'error' => 'account_already_merchant',
-                    'message' => 'This Google account is already linked to a merchant profile. Use merchant login flow.',
+                    'message' => 'Ce compte Google est déjà lié à un commerce (admin ou équipier). Pour créer un nouveau commerce, utilisez une autre adresse email Google non liée à un commerce.',
                 ], 409);
             }
 
@@ -262,7 +590,7 @@ class AuthController extends AbstractController
         if ($merchant === null) {
             return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
         }
-        if ($merchant->getSubscriptionStatus() === 'canceled') {
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
@@ -309,7 +637,7 @@ class AuthController extends AbstractController
         if ($merchant === null) {
             return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
         }
-        if ($merchant->getSubscriptionStatus() === 'canceled') {
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
@@ -356,7 +684,27 @@ class AuthController extends AbstractController
             }
 
             $shouldNotifyCustomerSignup = $customer->getId() === null;
-            $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $merchant);
+            try {
+                $isNewMerchantLink = $this->customerMerchantLinker->link($customer, $merchant);
+            } catch (CustomerMerchantLimitReachedException $exception) {
+                $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                    $merchant,
+                    $customer,
+                    $exception->getCurrentCustomers(),
+                    $exception->getMaxCustomers(),
+                    'parcours inscription Google',
+                );
+
+                return new JsonResponse([
+                    'error' => $exception->getMessage(),
+                    'message' => sprintf(
+                        'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                        $exception->getMaxCustomers(),
+                    ),
+                    'current_customers' => $exception->getCurrentCustomers(),
+                    'max_customers' => $exception->getMaxCustomers(),
+                ], 409);
+            }
             if ($isNewMerchantLink) {
                 $shouldNotifyCustomerSignup = true;
             }
@@ -462,7 +810,69 @@ class AuthController extends AbstractController
             'id' => $user->getId(),
             'email' => $user->getEmail(),
             'name' => $user->getName(),
+            'email_verified' => $user instanceof User ? $user->isEmailVerified() : true,
         ]);
+    }
+
+    #[Route('/api/auth/email/verify', name: 'auth_email_verify', methods: ['POST', 'OPTIONS'])]
+    public function verifyEmail(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $token = trim((string) (($data['token'] ?? '')));
+        if ($token === '') {
+            return new JsonResponse(['error' => 'token_required'], 422);
+        }
+
+        $result = $this->emailVerificationService->consumeToken($token);
+
+        return match ($result) {
+            'verified' => new JsonResponse(['status' => 'verified']),
+            'already_verified' => new JsonResponse(['status' => 'already_verified']),
+            'expired_token' => new JsonResponse(['error' => 'expired_token'], 410),
+            default => new JsonResponse(['error' => 'invalid_token'], 404),
+        };
+    }
+
+    #[Route('/api/auth/email/resend-verification', name: 'auth_email_resend_verification', methods: ['POST', 'OPTIONS'])]
+    public function resendEmailVerification(Request $request): JsonResponse
+    {
+        if ($request->getMethod() === 'OPTIONS') {
+            return new JsonResponse(null, 200);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $email = $this->normalizeEmail((string) (($data['email'] ?? '')));
+        $audience = trim((string) (($data['audience'] ?? 'customer')));
+        if ($audience !== 'merchant' && $audience !== 'customer') {
+            $audience = 'customer';
+        }
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email_invalid'], 422);
+        }
+
+        $user = $this->findUserByEmail($email);
+        if (!$user instanceof User) {
+            // Avoid user enumeration: behave like a success.
+            return new JsonResponse(['status' => 'sent']);
+        }
+
+        $result = $this->emailVerificationService->resendVerification($user, $audience);
+        if ($result['already_verified']) {
+            return new JsonResponse(['status' => 'already_verified']);
+        }
+        if ($result['sent'] === false && $result['retry_in'] !== null) {
+            return new JsonResponse([
+                'error' => 'resend_cooldown',
+                'retry_in' => $result['retry_in'],
+            ], 429);
+        }
+
+        return new JsonResponse(['status' => 'sent']);
     }
 
     private function upsertGoogleUser(GoogleUser $googleUser): User
@@ -492,6 +902,14 @@ class AuthController extends AbstractController
 
         if (!$user->getName()) {
             $user->setName((string) ($googleUser->getName() ?? $googleUser->getEmail()));
+        }
+
+        // Google-authenticated users are considered verified since Google
+        // already validated their email address.
+        if (!$user->isEmailVerified()) {
+            $user->setEmailVerified(true);
+            $user->setEmailVerifiedAt(new \DateTimeImmutable());
+            $user->setEmailVerificationToken(null);
         }
     }
 
@@ -549,6 +967,24 @@ class AuthController extends AbstractController
         return mb_strtolower(trim($email));
     }
 
+    private function normalizeEmail(string $email): string
+    {
+        return mb_strtolower(trim($email));
+    }
+
+    private function findUserByEmail(string $email): ?User
+    {
+        $normalizedEmail = $this->normalizeEmail($email);
+        $userRepository = $this->entityManager->getRepository(User::class);
+
+        if ($userRepository instanceof UserRepository) {
+            return $userRepository->findOneByNormalizedEmail($normalizedEmail);
+        }
+
+        $user = $userRepository->findOneBy(['email' => $normalizedEmail]);
+        return $user instanceof User ? $user : null;
+    }
+
     private function ensureUserRole(User $user, string $role): void
     {
         $roles = $user->getRoles();
@@ -583,6 +1019,7 @@ class AuthController extends AbstractController
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
                 'roles' => $user->getRoles(),
+                'email_verified' => $user->isEmailVerified(),
             ],
             'merchant_context' => $merchant ? [
                 'id' => $merchant->getId()?->toRfc4122(),
@@ -591,6 +1028,30 @@ class AuthController extends AbstractController
                 'is_owner' => $user->getMerchant() === $merchant,
                 'is_equipier' => $equipierMerchant === $merchant,
             ] : null,
+        ]);
+    }
+
+    private function buildCustomerAuthSuccessResponse(User $user, Customer $customer, ?Merchant $merchant = null): JsonResponse
+    {
+        return new JsonResponse([
+            'token' => $this->jwtManager->create($user),
+            'refresh_token' => $this->refreshTokenService->createRefreshToken($user)->getToken(),
+            'user' => [
+                'id' => $user->getId(),
+                'email' => $user->getEmail(),
+                'name' => $user->getName(),
+                'roles' => $user->getRoles(),
+                'email_verified' => $user->isEmailVerified(),
+            ],
+            'customer' => [
+                'id' => $customer->getId(),
+                'email' => $customer->getEmail(),
+                'name' => $customer->getName(),
+                'created_at' => $customer->getCreatedAt()?->format(DATE_ATOM),
+                'merchant_ref' => $merchant?->getId()?->toRfc4122(),
+                'is_equipier' => $customer->getStaffMerchant() !== null,
+                'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
+            ],
         ]);
     }
 
@@ -650,6 +1111,25 @@ class AuthController extends AbstractController
 
         if ($customer instanceof Customer && $this->canBindCustomerToUser($customer, $user)) {
             $customer->setUser($user);
+        }
+
+        return $customer;
+    }
+
+    private function resolveCustomerForPasswordUser(User $user): ?Customer
+    {
+        $customerRepository = $this->entityManager->getRepository(Customer::class);
+        $customer = $user->getCustomer();
+
+        if ($customer === null && $user->getId() !== null) {
+            $customer = $customerRepository->findOneBy(['user' => $user]);
+        }
+
+        if ($customer === null && $user->getEmail() !== null) {
+            $customer = $customerRepository->findOneBy(['email' => $user->getEmail()]);
+            if ($customer instanceof Customer && $this->canBindCustomerToUser($customer, $user)) {
+                $customer->setUser($user);
+            }
         }
 
         return $customer;
@@ -725,6 +1205,37 @@ class AuthController extends AbstractController
         }
 
         return $this->entityManager->getRepository(Merchant::class)->find($merchantId);
+    }
+
+    private function claimUnownedMerchantForEmail(User $user, string $email): ?Merchant
+    {
+        if ($user->getMerchant() !== null) {
+            return null;
+        }
+
+        /** @var MerchantRepository $merchantRepository */
+        $merchantRepository = $this->entityManager->getRepository(Merchant::class);
+        if (!method_exists($merchantRepository, 'findUnclaimedByEmail')) {
+            return null;
+        }
+
+        $matches = $merchantRepository->findUnclaimedByEmail($email);
+        if (!is_array($matches)) {
+            return null;
+        }
+
+        if (count($matches) === 0) {
+            return null;
+        }
+
+        if (count($matches) > 1) {
+            throw new \RuntimeException('Plusieurs commerces non réclamés ont le même email. Contactez le support pour finaliser le rattachement.');
+        }
+
+        $merchant = $matches[0];
+        $merchant->setUser($user);
+
+        return $merchant;
     }
 
     #[Route('/api/merchants/me', name: 'merchants_me', methods: ['GET'])]

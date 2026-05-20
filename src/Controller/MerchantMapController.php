@@ -9,6 +9,8 @@ use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
 use App\Enum\ContestStatus;
+use App\Exception\CustomerMerchantLimitReachedException;
+use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
 use App\Service\CustomerMerchantLinker;
@@ -25,6 +27,7 @@ final class MerchantMapController extends AbstractController
 {
     public function __construct(
         private readonly MerchantRepository $merchantRepository,
+        private readonly CustomerRepository $customerRepository,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly CustomerMerchantLinker $customerMerchantLinker,
@@ -57,7 +60,6 @@ final class MerchantMapController extends AbstractController
         $swLng = (float) $request->query->get('sw_lng', -5.1);
         $neLat = (float) $request->query->get('ne_lat', 51.1);
         $neLng = (float) $request->query->get('ne_lng', 9.6);
-
         $rows = $this->merchantRepository->findForMap($lat, $lng, $swLat, $swLng, $neLat, $neLng);
 
         if (empty($rows)) {
@@ -95,7 +97,6 @@ final class MerchantMapController extends AbstractController
 
         $today = new \DateTimeImmutable('today');
         $merchants = [];
-
         foreach ($rows as $row) {
             $merchant = $row['merchant'];
             $merchantId = $merchant->getId()?->toRfc4122();
@@ -104,41 +105,39 @@ final class MerchantMapController extends AbstractController
                 continue;
             }
 
+            $isClaimed = $merchant->getUser() !== null;
+
             // --- Loyalty programs ---
             $loyaltyPrograms = [];
             $hasActiveLoyaltyProgram = false;
-            foreach ($merchant->getLoyaltyPrograms() as $program) {
-                if (!$program->isActive()) {
-                    continue;
+            if ($isClaimed) {
+                foreach ($merchant->getLoyaltyPrograms() as $program) {
+                    if (!$program->isActive()) {
+                        continue;
+                    }
+                    $hasActiveLoyaltyProgram = true;
+
+                    // Customer card for this program (most recent non-completed first, then completed)
+                    $customerCard = $customerCardsByMerchant[$merchantId][$program->getId()] ?? null;
+
+                    $loyaltyPrograms[] = [
+                        'id' => $program->getId(),
+                        'name' => $program->getName(),
+                        'type' => $program->getType()->value,
+                        'stamp_target' => $program->getStampTarget(),
+                        'points_target' => $program->getPointsTarget(),
+                        'reward_description' => $program->getRewardDescription(),
+                        'customer_card' => $customerCard !== null ? [
+                            'current_value' => $customerCard->getCurrentValue(),
+                            'target_value' => $customerCard->getTargetValue(),
+                            'is_completed' => $customerCard->isCompleted(),
+                        ] : null,
+                    ];
                 }
-                $hasActiveLoyaltyProgram = true;
-
-                // Customer card for this program (most recent non-completed first, then completed)
-                $customerCard = $customerCardsByMerchant[$merchantId][$program->getId()] ?? null;
-
-                $loyaltyPrograms[] = [
-                    'id' => $program->getId(),
-                    'name' => $program->getName(),
-                    'type' => $program->getType()->value,
-                    'stamp_target' => $program->getStampTarget(),
-                    'points_target' => $program->getPointsTarget(),
-                    'reward_description' => $program->getRewardDescription(),
-                    'customer_card' => $customerCard !== null ? [
-                        'current_value' => $customerCard->getCurrentValue(),
-                        'target_value' => $customerCard->getTargetValue(),
-                        'is_completed' => $customerCard->isCompleted(),
-                    ] : null,
-                ];
             }
 
             // --- Active promotional offers ---
-            $activeOffers = [];
-            foreach ($merchant->getLoyaltyPrograms() as $program) {
-                // Offers are on the merchant, not the program — iterate merchant offers
-                // (handled below via the Merchant relation)
-            }
-            // Collect active offers directly from merchant (via lazy collection on PromotionalOffer)
-            $activeOffers = $this->collectActiveOffers($merchant, $today);
+            $activeOffers = $isClaimed ? $this->collectActiveOffers($merchant, $today) : [];
             $hasActiveOffer = count($activeOffers) > 0;
 
             // --- Visible contests (upcoming + active) ---
@@ -148,13 +147,18 @@ final class MerchantMapController extends AbstractController
             // --- Google Review module ---
             $googleModule = $googleModulesByMerchant[$merchantId] ?? null;
             $googleReview = null;
-            if ($googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
+            if ($isClaimed && $googleModule instanceof MerchantGoogleReviewModule && $googleModule->isEnabled()) {
                 $googleReview = [
                     'is_enabled' => true,
                     'display_name' => $googleModule->getDisplayName(),
                     'url' => $googleModule->getGoogleReviewUrl(),
                 ];
             }
+
+            // Count subscribers for social proof
+            $subscriberCount = $isClaimed ? $this->customerRepository->countByMerchant($merchant) : 0;
+            $plan = $merchant->getPlan();
+            $customerSignupAvailable = $isClaimed && ($plan === null || $plan->getMaxCustomers() < 0 || $subscriberCount < $plan->getMaxCustomers());
 
             $merchants[] = [
                 'id' => $merchantId,
@@ -167,6 +171,9 @@ final class MerchantMapController extends AbstractController
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
+                'subscriber_count' => $subscriberCount,
+                'customer_signup_available' => $customerSignupAvailable,
+                'is_claimed' => $isClaimed,
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram || $hasVisibleContests,
                 'is_customer_linked' => isset($linkedMerchantIds[$merchantId]),
                 'loyalty_programs' => $loyaltyPrograms,
@@ -229,11 +236,12 @@ final class MerchantMapController extends AbstractController
 
         $merchants = array_map(function (array $row) use ($merchantById, $today, $contestsByMerchant): array {
             $merchantEntity = $merchantById[$row['id']] ?? null;
+            $isClaimed = $merchantEntity instanceof Merchant && $merchantEntity->getUser() !== null;
             $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
-                ? $merchantEntity->getActiveLoyaltyProgramCount() > 0
+                ? ($isClaimed && $merchantEntity->getActiveLoyaltyProgramCount() > 0)
                 : false;
             $hasActiveOffers = $merchantEntity instanceof Merchant
-                ? count($this->collectActiveOffers($merchantEntity, $today)) > 0
+                ? ($isClaimed && count($this->collectActiveOffers($merchantEntity, $today)) > 0)
                 : false;
             $merchantId = (string) $row['id'];
             $hasVisibleContests = count($contestsByMerchant[$merchantId] ?? []) > 0;
@@ -250,6 +258,7 @@ final class MerchantMapController extends AbstractController
                 'has_loyalty_programs' => $hasLoyaltyPrograms,
                 'has_active_promotional_offers' => $hasActiveOffers,
                 'has_active_or_upcoming_contests' => $hasVisibleContests,
+                'is_claimed' => $isClaimed,
             ];
         }, $rows);
 
@@ -287,7 +296,27 @@ final class MerchantMapController extends AbstractController
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
-        $isNewLink = $this->customerMerchantLinker->link($customer, $merchant);
+        try {
+            $isNewLink = $this->customerMerchantLinker->link($customer, $merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                $customer,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'carte interactive',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
         $this->entityManager->flush();
 
         if ($isNewLink) {

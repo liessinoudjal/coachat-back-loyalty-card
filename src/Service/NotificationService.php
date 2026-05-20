@@ -82,15 +82,20 @@ class NotificationService
         );
     }
 
-    public function notifyCustomerSignup(Customer $customer, Merchant $merchant): void
+    public function notifyCustomerSignup(Customer $customer, Merchant $merchant, ?string $verifyUrl = null): void
     {
+        $context = [
+            'dashboard_url' => $this->buildCustomerDashboardUrl(),
+        ];
+        if ($verifyUrl !== null && $verifyUrl !== '') {
+            $context['verify_url'] = $verifyUrl;
+        }
+
         $this->send(
             $merchant,
             $customer,
             NotificationType::CUSTOMER_SIGNUP,
-            [
-                'dashboard_url' => $this->buildCustomerDashboardUrl(),
-            ],
+            $context,
         );
     }
 
@@ -419,9 +424,10 @@ class NotificationService
 
     private function resolveChannel(Merchant $merchant): NotificationChannel
     {
-        return $merchant->getPlan()?->isHasPushNotifications()
-            ? NotificationChannel::PUSH
-            : NotificationChannel::EMAIL;
+        // Free account = accès aux fonctionnalités premium dont les notifications push.
+        $pushEnabled = $merchant->isFreeAccount() || (bool) $merchant->getPlan()?->isHasPushNotifications();
+
+        return $pushEnabled ? NotificationChannel::PUSH : NotificationChannel::EMAIL;
     }
 
     private function buildCustomerDashboardUrl(): string

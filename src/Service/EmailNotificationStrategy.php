@@ -7,6 +7,8 @@ use App\Entity\Merchant;
 use App\Enum\LoyaltyProgramType;
 use App\Enum\NotificationType;
 use App\Repository\MerchantGoogleReviewModuleRepository;
+use App\Repository\GoogleReviewEventRepository;
+use App\Enum\GoogleReviewEventType;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Address;
@@ -21,6 +23,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
         private readonly GoogleReviewUrlValidator $googleReviewUrlValidator,
         private readonly LoggerInterface $logger,
+        private readonly GoogleReviewEventRepository $googleReviewEventRepository,
         private readonly string $fromEmail,
         private readonly string $fromName,
     ) {
@@ -109,6 +112,21 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
      */
     private function buildEmailData(Merchant $merchant, Customer $customer, NotificationType $type, array $context): array
     {
+        // Suppress Google Review invite if OUTBOUND_CLICKED exists for this customer/merchant
+        $hasClickedGoogleReview = false;
+        try {
+            $event = $this->googleReviewEventRepository->findLatestOutboundClickedForCustomerAndMerchant($customer, $merchant);
+            $hasClickedGoogleReview = $event !== null;
+        } catch (\Throwable $e) {
+            $this->logger->error('Error checking OUTBOUND_CLICKED event for Google Review invite suppression', [
+                'customer_id' => $customer->getId()?->toRfc4122(),
+                'merchant_id' => $merchant->getId()?->toRfc4122(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
+        // Add suppression flag to context for Google Review invite
+        $context['show_google_review_invite'] = !$hasClickedGoogleReview;
+
         return match ($type) {
             NotificationType::CUSTOMER_SIGNUP => $this->buildCustomerSignupEmailData($merchant, $customer, $context),
             NotificationType::EQUIPIER_ASSIGNED => $this->buildEquipierAssignedEmailData($merchant, $customer, $context),
@@ -221,23 +239,32 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildCustomerSignupEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $subject = sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat');
+        $verifyUrl = (string) ($context['verify_url'] ?? '');
+        $needsVerification = $verifyUrl !== '';
+        $subject = $needsVerification
+            ? sprintf('Bienvenue chez %s — confirmez votre adresse email', $merchant->getCompanyName() ?? 'Coachat')
+            : sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
-        $text = implode("\n", [
+        $text = implode("\n", array_filter([
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
             '',
-            sprintf('Bienvenue chez %s. Votre inscription est maintenant terminée.', $merchant->getCompanyName() ?? 'ce commerce'),
-            'Votre espace client est prêt pour suivre vos cartes, vos points et vos récompenses.',
-            'Vous pouvez maintenant choisir une carte de fidélité du commerçant depuis votre espace client carte ou demander au commerçant de vous en attribuer une.',
+            sprintf('Bienvenue chez %s. Votre inscription est bien enregistrée.', $merchant->getCompanyName() ?? 'ce commerce'),
+            $needsVerification
+                ? 'Avant d\'accéder à votre espace, veuillez confirmer votre adresse email en cliquant sur le lien ci-dessous (valable 24 heures) :'
+                : 'Votre espace client est prêt pour suivre vos cartes, vos points et vos récompenses.',
+            $needsVerification ? $verifyUrl : null,
+            'Vous pourrez ensuite choisir une carte de fidélité depuis votre espace client ou demander au commerçant de vous en attribuer une.',
             $dashboardUrl !== '' ? sprintf('Accéder à mon dashboard : %s', $dashboardUrl) : null,
-        ]);
+        ], static fn ($line) => $line !== null));
 
         $html = $this->twig->render('emails/customer_signup_welcome.html.twig', [
-            'email_title' => 'Bienvenue sur Coachat',
-            'email_eyebrow' => 'Bienvenue client',
-            'email_accent' => 'BIENVENUE',
-            'summary' => sprintf('Votre inscription chez %s est confirmée. Vous pouvez maintenant accéder à votre espace client.', $merchant->getCompanyName() ?? 'ce commerce'),
+            'email_title' => $needsVerification ? 'Bienvenue — confirmez votre email' : 'Bienvenue sur Coachat',
+            'email_eyebrow' => $needsVerification ? 'Activation requise' : 'Bienvenue client',
+            'email_accent' => $needsVerification ? 'À CONFIRMER' : 'BIENVENUE',
+            'summary' => $needsVerification
+                ? sprintf('Votre inscription chez %s est presque terminée. Confirmez votre adresse email pour activer votre compte.', $merchant->getCompanyName() ?? 'ce commerce')
+                : sprintf('Votre inscription chez %s est confirmée. Vous pouvez maintenant accéder à votre espace client.', $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $customer->getName() ?? 'Client',
             'primary_label' => 'Compte',
             'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
@@ -245,6 +272,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'customer' => $customer,
             'merchant' => $merchant,
             'dashboard_url' => $dashboardUrl,
+            'verify_url' => $verifyUrl,
+            'needs_verification' => $needsVerification,
         ] + $googleReviewInviteContext);
 
         return [

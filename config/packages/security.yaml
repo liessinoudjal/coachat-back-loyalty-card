@@ -45,10 +45,18 @@ security:
     access_control:
         - { path: ^/api/auth/google$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/google/callback$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/merchant/register-form$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/merchant/login-form$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/customer/google$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/customer/register-form$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/customer/login-form$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/customer/google/callback$, roles: PUBLIC_ACCESS }
         - { path: ^/api/auth/refresh$, roles: PUBLIC_ACCESS }
-        - { path: ^/api/public/merchants/showcase$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/email/verify$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/email/resend-verification$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/merchants/map, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/merchants/search, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/merchants/, roles: PUBLIC_ACCESS }
         - { path: ^/api/legal/terms/current-version, roles: PUBLIC_ACCESS }
         - { path: ^/api/plans, roles: PUBLIC_ACCESS }
         - { path: ^/api/subscription/webhook, roles: PUBLIC_ACCESS }

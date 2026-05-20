@@ -309,6 +309,100 @@ Ce flow est dédié à la connexion d'un customer déjà existant, sans `merchan
 - `403` : `customer_not_found`
 - `400` : `Authentication failed: ...`
 
+#### 2.e Form-based signup & login (mot de passe)
+
+Endpoints d'inscription et de connexion par formulaire (email + mot de passe). Le login form est **unifié** depuis mai 2026 : il accepte tous les rôles (merchant, customer, super-admin) sur le **même endpoint**. L'ancien `POST /api/auth/customer/login-form` est supprimé.
+
+##### Inscription merchant
+```
+POST /api/auth/merchant/register-form
+```
+
+**Body :**
+```json
+{
+  "name": "Acme SARL",
+  "email": "contact@acme.fr",
+  "password": "********"
+}
+```
+
+**Réponse** : même format que le login merchant (token JWT + user). Le compte est créé avec `email_verified=false` et un email de vérification dédié est envoyé.
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `email_invalid`, `password_too_short`
+- `409` : `account_already_exists`, `account_already_customer`, `account_exists_with_google`
+
+##### Inscription customer
+```
+POST /api/auth/customer/register-form
+```
+
+**Body :**
+```json
+{
+  "name": "Léa Côté",
+  "email": "lea@example.com",
+  "password": "********",
+  "merchant_ref": "<merchant_uuid>",
+  "accepted_terms": true,
+  "accepted_terms_version": "v1",
+  "accepted_terms_accepted_at": "2026-05-19T12:00:00+00:00"
+}
+```
+
+**Réponse** : même format que le callback customer Google (token + user + customer). Le compte est créé avec `email_verified=false`. **Un seul email** est envoyé : le mail de bienvenue qui embarque un lien de confirmation d'adresse (CTA "Confirmer mon adresse email").
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `email_invalid`, `password_too_short`, `accepted_terms_required`, `merchant_ref_invalid`, `merchant_ref_inactive`
+- `409` : `account_already_exists`, `account_already_merchant`, `account_already_customer`, `account_exists_with_google`, `customer_limit_reached`
+
+##### Login unifié (merchant + customer + super-admin)
+```
+POST /api/auth/merchant/login-form
+```
+
+Endpoint **central** pour tous les logins par mot de passe. Le routage rôle se fait côté serveur en fonction du profil lié au user. L'ancien `POST /api/auth/customer/login-form` a été **supprimé** ; les anciens clients qui scannent un QR avec un compte existant peuvent passer ici en transmettant un `merchant_ref` optionnel.
+
+**Body :**
+```json
+{
+  "email": "user@example.com",
+  "password": "********",
+  "merchant_ref": "<merchant_uuid>"
+}
+```
+
+- `merchant_ref` est **optionnel**. S'il est fourni et que le user est résolu comme un customer, le customer est lié au merchant (équivalent à un signup par QR pour un compte existant).
+- `merchant_ref` est **ignoré** si le user est un merchant ou un super-admin.
+
+**Comportement :**
+1. Si le user est super-admin ou merchant linked → réponse merchant standard (`buildAuthSuccessResponse`).
+2. Sinon, si le user a un `Customer` accessible → ajoute `ROLE_CUSTOMER`, applique le linking `merchant_ref` si fourni, renvoie la réponse customer (`buildCustomerAuthSuccessResponse`) avec un payload `customer.{id,email,name,merchant_ref}`.
+3. Sinon → `403 account_not_linked`.
+
+**Réponse merchant :**
+```json
+{
+  "token": "jwt_token_here",
+  "refresh_token": "refresh_token_here",
+  "user": { "id": 1, "email": "...", "name": "...", "email_verified": true },
+  "merchant_context": { "id": "...", "company_name": "..." }
+}
+```
+
+**Réponse customer :** identique au callback Google customer (cf. §2.c), avec un objet `customer` au lieu de `merchant_context`.
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `merchant_ref_invalid`, `merchant_ref_inactive`
+- `401` : `invalid_credentials`
+- `403` : `account_not_linked` (nouvelle erreur ; remplace l'ancien `account_already_customer` côté merchant login et `customer_not_found` côté customer login)
+- `409` : `use_google_login`, `customer_limit_reached` (si linking `merchant_ref` dépasse le plafond du merchant)
+
+**Notes de migration :**
+- Tous les anciens consommateurs de `POST /api/auth/customer/login-form` doivent passer à `POST /api/auth/merchant/login-form` en transmettant `merchant_ref` si nécessaire.
+- Les QR codes en production encodent toujours `/?customer_signup=1&merchant_ref=<id>` et redirigent vers `/customer/signup` côté frontend ; aucune régression QR.
+
 #### 3. Get User Profile
 ```
 GET /api/profile
@@ -2038,6 +2132,108 @@ Le module public legacy de claim customer a été retiré du backend.
 - cartes customer via `GET /api/customers/me/cards`
 - rewards customer via `GET /api/customers/me/rewards`
 
+---
+
+## Carte publique – Découverte des marchands (sans auth)
+
+Ces endpoints sont **publics** (aucun JWT requis). Ils alimentent la landing page statique (`index.html`) et la carte interactive customer (`/app/map`).
+
+> **Note suppression showcase** : L'endpoint `GET /api/public/merchants/showcase` a été **supprimé**. La découverte se fait exclusivement via la carte interactive et la recherche.
+
+### Map publique – Chargement des pins
+```
+GET /api/public/merchants/map
+```
+
+Retourne les marchands visibles dans une zone géographique (bounds).
+
+**Query params :**
+- `north`, `south`, `east`, `west` (float) — bounding box de la carte
+- `zoom` (int, optionnel) — niveau de zoom courant
+
+**Réponse :**
+```json
+{
+  "merchants": [
+    {
+      "id": "uuid",
+      "company_name": "Ma Boulangerie",
+      "latitude": 47.902,
+      "longitude": 1.909,
+      "has_active_promotional_offers": true,
+      "has_loyalty_programs": true
+    }
+  ]
+}
+```
+
+### Recherche publique de marchands
+```
+GET /api/public/merchants/search?q=&limit=&lat=&lng=
+```
+
+Recherche texte sur les marchands. Côté frontend, ce call est combiné avec un appel à `api-adresse.data.gouv.fr` (BAN – Base Adresse Nationale) pour les résultats d'adresse. **Ne pas utiliser Nominatim/OpenStreetMap** pour le géocodage.
+
+**Query params :**
+- `q` (string, requis, min 3 chars) — terme de recherche
+- `limit` (int, défaut 5) — nombre max de résultats
+- `lat`, `lng` (float, optionnel) — position de l'utilisateur pour trier par proximité
+
+**Rate limiting :** `429 Too Many Requests` si le seuil est dépassé. Le frontend affiche un message "Trop de requêtes, réessayez dans une minute." et ne relance pas automatiquement.
+
+**Réponse :**
+```json
+{
+  "merchants": [
+    {
+      "id": "uuid",
+      "company_name": "Coachat Test",
+      "address": "12 rue de la Paix",
+      "postal_code": "45000",
+      "city": "Orléans",
+      "latitude": 47.902,
+      "longitude": 1.909,
+      "has_active_promotional_offers": false,
+      "has_loyalty_programs": true
+    }
+  ]
+}
+```
+
+### Détail d'un marchand public
+```
+GET /api/public/merchants/{id}
+```
+
+Retourne le profil complet d'un marchand pour le bottom sheet de la carte.
+
+**Réponse :**
+```json
+{
+  "id": "uuid",
+  "company_name": "Coachat Test",
+  "address": "12 rue de la Paix",
+  "postal_code": "45000",
+  "city": "Orléans",
+  "phone": "...",
+  "website": "...",
+  "latitude": 47.902,
+  "longitude": 1.909,
+  "loyalty_programs": [...],
+  "active_promotional_offers": [...]
+}
+```
+
+### Comportement de la carte publique (index.html)
+
+- **Centrage par défaut** : Orléans (`lat: 47.9029, lng: 1.9092`, zoom 13) — indépendamment de la géolocalisation.
+- **Géolocalisation** : utilisée uniquement pour enrichir les appels search (`lat`/`lng` params) pour le tri par proximité. Elle ne recentre **pas** la carte.
+- **Recherche** : double appel parallèle — marchands (backend) + adresses (BAN `api-adresse.data.gouv.fr`). Résultats fusionnés, max 8.
+- **Clic résultat de recherche** : `flyTo` + surlignage du pin uniquement. Le bottom sheet marchand s'ouvre **uniquement au clic sur un pin**.
+- **Aucun résultat** : affiche un CTA "Vous êtes commerçant ? Inscrivez votre établissement ici" pointant vers `/register`.
+
+---
+
 3. Backend résout le Stripe Price ID depuis la BDD (non exposé)
 4. Backend crée/récupère le customer Stripe et crée une session Checkout
 5. Frontend redirige vers `checkoutUrl`
@@ -2779,6 +2975,147 @@ Retourne la configuration du merchant courant. Si elle n'existe pas encore, le b
 #### PUT /api/merchants/me/google-review-module
 
 ```http
+
+## Public API
+
+Cette section décrit les endpoints publics accessibles sans authentification JWT, destinés au frontend public (landing page, map de découverte).
+
+### Get Merchants Map
+```
+GET /api/public/merchants/map
+```
+
+Endpoint public pour découvrir les marchands avec géolocalisation, filtrage, et pagination.
+
+**Query Parameters :**
+- `latitude` (float, optional) : latitude du point de recherche
+- `longitude` (float, optional) : longitude du point de recherche
+- `radius_km` (float, optional, défaut 10) : rayon de recherche en kilomètres
+- `limit` (int, optional, défaut 20) : nombre de résultats max
+- `offset` (int, optional, défaut 0) : pagination offset
+- `search` (string, optional) : recherche textuelle sur `company_name`
+
+**Réponse 200 :**
+```json
+{
+  "merchants": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "company_name": "Boulangerie Martin",
+      "address": "123 rue de la Paix, 75000 Paris",
+      "postal_code": "75000",
+      "city": "Paris",
+      "phone": "01 23 45 67 89",
+      "logo_url": "data:image/png;base64,iVBORw0KGgoAAAANS...",
+      "latitude": 48.8566,
+      "longitude": 2.3522,
+      "distance_km": 2.5,
+      "subscriber_count": 42,
+      "has_active_content": true,
+      "is_customer_linked": false,
+      "loyalty_programs": [
+        {
+          "id": 1,
+          "name": "Fidélité Pains",
+          "type": "STAMP",
+          "stamp_target": 10,
+          "reward_description": "1 pain offert",
+          "is_active": true
+        }
+      ],
+      "active_promotional_offers": [
+        {
+          "id": 2,
+          "name": "Promo Croissants",
+          "description": "30% de réduction",
+          "discount_percentage": 30,
+          "valid_from": "2026-05-13T00:00:00Z",
+          "valid_until": "2026-05-20T23:59:59Z",
+          "is_active": true
+        }
+      ],
+      "google_review": {
+        "id": "uuid-module",
+        "merchant_id": "550e8400-e29b-41d4-a716-446655440000",
+        "is_enabled": true,
+        "display_name": "Avis Google",
+        "google_review_url": "https://g.page/r/bakery-martin/review",
+        "show_in_customer_dashboard": true,
+        "show_qr_code": true,
+        "is_configuration_complete": true,
+        "created_at": "2026-04-19T12:00:00+00:00"
+      }
+    }
+  ],
+  "total": 145
+}
+```
+
+**Structure détaillée :**
+
+**MapMerchant :**
+- `id` (string UUID) : identifiant unique du merchant
+- `company_name` (string) : nom de la boutique/entreprise
+- `address` (string | null) : adresse complète
+- `postal_code` (string | null) : code postal
+- `city` (string | null) : ville
+- `phone` (string | null) : téléphone du merchant
+- `logo_url` (string | null) : URL data:image base64 du logo (optionnel)
+- `latitude` (number) : latitude (calculée depuis address si present)
+- `longitude` (number) : longitude (calculée depuis address si present)
+- `distance_km` (number | null) : distance en km depuis le point de recherche (null si pas de géolocalisation)
+- `subscriber_count` (number | null) : nombre d'abonnés/clients du merchant (social proof)
+- `has_active_content` (boolean) : merchant a au moins un programme de fidélité actif ou une offre promo active
+- `is_customer_linked` (boolean) : utilisateur courant est lié à ce merchant (nécessite token customer)
+- `loyalty_programs` (array MapLoyaltyProgram[]) : programs de fidélité actifs
+- `active_promotional_offers` (array MapActiveOffer[]) : offres promotionnelles actives
+- `google_review` (MapGoogleReview | null) : configuration module Avis Google si complète, null sinon
+
+**MapLoyaltyProgram :**
+- `id` (integer) : identifiant
+- `name` (string) : nom du program
+- `type` (string enum) : `STAMP` ou `POINTS`
+- `stamp_target` (integer | null) : nombre de stamps cible pour reward (si STAMP)
+- `reward_description` (string) : description de la récompense
+- `is_active` (boolean) : program actif
+
+**MapActiveOffer :**
+- `id` (integer) : identifiant
+- `name` (string) : nom de l'offre
+- `description` (string | null) : description courte
+- `discount_percentage` (integer | null) : pourcentage de réduction si applicable
+- `valid_from` (datetime ISO 8601) : début validité
+- `valid_until` (datetime ISO 8601) : fin validité
+- `is_active` (boolean) : offre active
+
+**MapGoogleReview :**
+- `id` (string UUID) : identifiant du module
+- `merchant_id` (string UUID) : référence au merchant
+- `is_enabled` (boolean) : module activé
+- `display_name` (string) : label d'affichage (ex: "Avis Google")
+- `google_review_url` (string) : URL Google complète du merchant
+- `show_in_customer_dashboard` (boolean) : afficher dans dashboard customer
+- `show_qr_code` (boolean) : afficher QR code de reward
+- `is_configuration_complete` (boolean) : module complètement configuré
+- `created_at` (datetime ISO 8601) : date de création
+
+**Comportements :**
+- La réponse est paginée : utiliser `offset` + `limit` pour naviguer
+- `distance_km` est calculé via haversine depuis lat/lon si les paramètres de géolocalisation sont fournis
+- `subscriber_count` affiche le nombre d'abonnés du merchant (pour la preuve sociale)
+- `loyalty_programs` et `active_promotional_offers` ne contiennent que les éléments actifs
+- `google_review` n'est inclus que si le module est complètement configuré
+- `logo_url` est stocké en base64 pour faciliter l'intégration frontend
+
+**Erreurs possibles :**
+- `400` : paramètres géolocalisation invalides (latitude/longitude non numérique)
+- `400` : `radius_km` négatif ou invalide
+- `200` : résultat vide si aucun merchant ne correspond (tableau `merchants` vide)
+
+**Performance :**
+- Résultats limités par défaut à 20 pour éviter surcharge
+- Géolocalisation peut être omise (recherche sur tous les merchants)
+- `search` effectue une recherche case-insensitive sur `company_name`
 PUT /api/merchants/me/google-review-module
 Authorization: Bearer <token>
 ```

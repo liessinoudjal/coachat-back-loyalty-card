@@ -10,8 +10,10 @@ use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\Merchant;
 use App\Entity\RefreshToken;
 use App\Entity\User;
+use App\Repository\CustomerRepository;
 use App\Service\NotificationService;
 use App\Service\CustomerMerchantLinker;
+use App\Service\EmailVerificationService;
 use App\Service\RefreshTokenService;
 use App\Service\SignupAlertMailer;
 use App\Repository\CustomerMerchantNotificationPreferenceRepository;
@@ -27,6 +29,7 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 final class AuthControllerTest extends TestCase
 {
@@ -388,6 +391,295 @@ final class AuthControllerTest extends TestCase
         self::assertNotSame('', $payload['state']);
     }
 
+    public function testCustomerQrAuthReturnsLimitErrorWhenMerchantAtCapacity(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Limited Merchant');
+        $merchant->setPlan($this->buildPlanWithCustomerLimit(1));
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $customerRepositoryService = $this->createMock(CustomerRepository::class);
+        $customerRepositoryService
+            ->expects(self::once())
+            ->method('countByMerchant')
+            ->with(self::identicalTo($merchant))
+            ->willReturn(1);
+
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
+        $signupAlertMailer
+            ->expects(self::once())
+            ->method('notifyMerchantSignupRefusedDueToCustomerLimit')
+            ->with(
+                self::identicalTo($merchant),
+                null,
+                1,
+                1,
+                'parcours inscription Google',
+            );
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            ),
+            $signupAlertMailer,
+            null,
+            $customerRepositoryService,
+        );
+
+        $response = $controller->googleCustomerAuth(Request::create(
+            '/api/auth/customer/google',
+            'GET',
+            [
+                'merchant_ref' => $merchantRef,
+                'redirect_uri' => 'https://front.example.com/auth/customer/callback',
+            ],
+        ));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('customer_limit_reached', $payload['error']);
+        self::assertSame(1, $payload['current_customers']);
+        self::assertSame(1, $payload['max_customers']);
+    }
+
+    public function testMerchantRegisterFormTriggersVerificationEmail(): void
+    {
+        $capturedUser = null;
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(),
+            onPersist: static function (object $entity) use (&$capturedUser): void {
+                if ($entity instanceof User) {
+                    $capturedUser = $entity;
+                }
+            },
+        );
+
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService
+            ->expects(self::once())
+            ->method('issueAndSendVerification')
+            ->with(self::isInstanceOf(User::class), 'merchant')
+            ->willReturn(true);
+
+        $passwordHasher = $this->createMock(UserPasswordHasherInterface::class);
+        $passwordHasher->method('hashPassword')->willReturn('hashed-secret');
+
+        $controller = $this->createControllerWithEntityManager(
+            $entityManager,
+            null,
+            null,
+            null,
+            $emailService,
+            $passwordHasher,
+        );
+
+        $response = $controller->merchantRegisterForm($this->createJsonRequest([
+            'name' => 'Maïté Dupré',
+            'email' => 'new-merchant@example.com',
+            'password' => 'super-secret-pwd',
+        ]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('jwt-token', $payload['token']);
+        self::assertFalse($payload['user']['email_verified']);
+        self::assertNotNull($capturedUser);
+        self::assertFalse($capturedUser->isEmailVerified());
+    }
+
+    public function testCustomerRegisterFormTriggersVerificationEmail(): void
+    {
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Welcoming Shop');
+        $merchant->setPlan($this->buildPlanWithCustomerLimit(100));
+        $merchantRef = $merchant->getId()?->toRfc4122();
+        self::assertNotNull($merchantRef);
+
+        $capturedUser = null;
+        $entityManager = $this->createEntityManager(
+            userRepository: $this->createUserRepository(fn () => null),
+            customerRepository: $this->createCustomerRepository(),
+            merchantRepository: $this->createMerchantRepository(fn (mixed $id) => $merchant),
+            onPersist: static function (object $entity) use (&$capturedUser): void {
+                if ($entity instanceof User) {
+                    $capturedUser = $entity;
+                }
+            },
+        );
+
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService
+            ->expects(self::once())
+            ->method('issueTokenAndBuildUrl')
+            ->with(self::isInstanceOf(User::class))
+            ->willReturn('https://front.test/verify-email?token=test-token');
+        $emailService
+            ->expects(self::never())
+            ->method('issueAndSendVerification');
+
+        $passwordHasher = $this->createMock(UserPasswordHasherInterface::class);
+        $passwordHasher->method('hashPassword')->willReturn('hashed-secret');
+
+        $controller = $this->createControllerWithEntityManager(
+            $entityManager,
+            null,
+            null,
+            null,
+            $emailService,
+            $passwordHasher,
+        );
+
+        $response = $controller->customerRegisterForm($this->createJsonRequest([
+            'name' => 'Léa Côté',
+            'email' => 'new-customer@example.com',
+            'password' => 'super-secret-pwd',
+            'merchant_ref' => $merchantRef,
+            'accepted_terms' => true,
+            'accepted_terms_version' => 'v1',
+            'accepted_terms_accepted_at' => '2026-05-19T12:00:00+00:00',
+        ]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertFalse($payload['user']['email_verified']);
+        self::assertNotNull($capturedUser);
+        self::assertFalse($capturedUser->isEmailVerified());
+    }
+
+    public function testVerifyEmailEndpointDelegatesToService(): void
+    {
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService
+            ->expects(self::once())
+            ->method('consumeToken')
+            ->with('the-token')
+            ->willReturn('verified');
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(),
+            ),
+            emailVerificationService: $emailService,
+        );
+
+        $response = $controller->verifyEmail($this->createJsonRequest(['token' => 'the-token']));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('verified', $payload['status']);
+    }
+
+    public function testVerifyEmailEndpointReturns410WhenExpired(): void
+    {
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService->method('consumeToken')->willReturn('expired_token');
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(),
+            ),
+            emailVerificationService: $emailService,
+        );
+
+        $response = $controller->verifyEmail($this->createJsonRequest(['token' => 'stale-token']));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(410, $response->getStatusCode());
+        self::assertSame('expired_token', $payload['error']);
+    }
+
+    public function testResendEmailVerificationCallsServiceForKnownUser(): void
+    {
+        $user = $this->createUser('pending@example.com', ['ROLE_USER'], '');
+        $user->setEmailVerified(false);
+
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService
+            ->expects(self::once())
+            ->method('resendVerification')
+            ->with(self::identicalTo($user), 'customer')
+            ->willReturn(['sent' => true, 'retry_in' => null, 'already_verified' => false]);
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(static fn (array $criteria) => ($criteria['email'] ?? null) === 'pending@example.com' ? $user : null),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(),
+            ),
+            emailVerificationService: $emailService,
+        );
+
+        $response = $controller->resendEmailVerification($this->createJsonRequest([
+            'email' => 'pending@example.com',
+            'audience' => 'customer',
+        ]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('sent', $payload['status']);
+    }
+
+    public function testResendEmailVerificationReturnsCooldownStatus(): void
+    {
+        $user = $this->createUser('cooldown@example.com', ['ROLE_USER'], '');
+        $user->setEmailVerified(false);
+
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService
+            ->method('resendVerification')
+            ->willReturn(['sent' => false, 'retry_in' => 42, 'already_verified' => false]);
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(static fn (array $criteria) => $user),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(),
+            ),
+            emailVerificationService: $emailService,
+        );
+
+        $response = $controller->resendEmailVerification($this->createJsonRequest([
+            'email' => 'cooldown@example.com',
+        ]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(429, $response->getStatusCode());
+        self::assertSame('resend_cooldown', $payload['error']);
+        self::assertSame(42, $payload['retry_in']);
+    }
+
+    public function testResendEmailVerificationDoesNotLeakUnknownAccounts(): void
+    {
+        $emailService = $this->createMock(EmailVerificationService::class);
+        $emailService->expects(self::never())->method('resendVerification');
+
+        $controller = $this->createControllerWithEntityManager(
+            $this->createEntityManager(
+                userRepository: $this->createUserRepository(fn () => null),
+                customerRepository: $this->createCustomerRepository(),
+                merchantRepository: $this->createMerchantRepository(),
+            ),
+            emailVerificationService: $emailService,
+        );
+
+        $response = $controller->resendEmailVerification($this->createJsonRequest([
+            'email' => 'nobody@example.com',
+        ]));
+        $payload = $this->decodeResponse($response);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('sent', $payload['status']);
+    }
+
     private function createController(
         EntityRepository $userRepository,
         EntityRepository $customerRepository,
@@ -403,6 +695,9 @@ final class AuthControllerTest extends TestCase
         EntityManagerInterface $entityManager,
         ?SignupAlertMailer $signupAlertMailer = null,
         ?NotificationService $notificationService = null,
+        ?CustomerRepository $customerRepositoryService = null,
+        ?EmailVerificationService $emailVerificationService = null,
+        ?UserPasswordHasherInterface $passwordHasher = null,
     ): AuthController
     {
         $provider = $this->createMock(AbstractProvider::class);
@@ -431,6 +726,10 @@ final class AuthControllerTest extends TestCase
 
         $signupAlertMailer ??= $this->createMock(SignupAlertMailer::class);
         $notificationService ??= $this->createMock(NotificationService::class);
+        if ($customerRepositoryService === null) {
+            $customerRepositoryService = $this->createMock(CustomerRepository::class);
+            $customerRepositoryService->method('countByMerchant')->willReturn(0);
+        }
         $notificationPreferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
         $notificationPreferenceRepository
             ->method('findOneByCustomerAndMerchant')
@@ -438,6 +737,7 @@ final class AuthControllerTest extends TestCase
 
         $customerMerchantLinker = new CustomerMerchantLinker(
             $entityManager,
+            $customerRepositoryService,
             $notificationPreferenceRepository,
         );
 
@@ -450,6 +750,8 @@ final class AuthControllerTest extends TestCase
             $signupAlertMailer,
             $notificationService,
             $customerMerchantLinker,
+            $passwordHasher ?? $this->createMock(UserPasswordHasherInterface::class),
+            $emailVerificationService ?? $this->createMock(EmailVerificationService::class),
         );
     }
 
@@ -513,6 +815,23 @@ final class AuthControllerTest extends TestCase
         return $repository;
     }
 
+    private function buildPlanWithCustomerLimit(int $maxCustomers): \App\Entity\Plan
+    {
+        $plan = new \App\Entity\Plan();
+        $plan->setSlug('free');
+        $plan->setName('Free');
+        $plan->setPriceMonthly(0);
+        $plan->setMaxCustomers($maxCustomers);
+        $plan->setMaxPrograms(1);
+        $plan->setHasWalletIntegration(false);
+        $plan->setHasPushNotifications(false);
+        $plan->setHasAdvancedStats(false);
+        $plan->setIsActive(true);
+        $plan->setStripePriceId('price_free');
+
+        return $plan;
+    }
+
     private function createNotificationPreferenceRepository(?callable $resolver = null): EntityRepository&MockObject
     {
         $repository = $this->getMockBuilder(EntityRepository::class)->disableOriginalConstructor()->getMock();
@@ -556,6 +875,19 @@ final class AuthControllerTest extends TestCase
                 'redirect_uri' => 'https://front.example.com/callback',
                 'state' => 'state-token',
             ], $extraPayload), JSON_THROW_ON_ERROR),
+        );
+    }
+
+    private function createJsonRequest(array $payload): Request
+    {
+        return Request::create(
+            '/api/test',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode($payload, JSON_THROW_ON_ERROR),
         );
     }
 

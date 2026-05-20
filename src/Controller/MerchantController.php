@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\Merchant;
 use App\Entity\MerchantAssetDownloadEvent;
+use App\Repository\CustomerRepository;
 use App\Repository\PlanRepository;
 use App\Service\LegalTermsVersionProvider;
 use App\Service\SignupAlertMailer;
@@ -20,13 +21,15 @@ class MerchantController extends AbstractController
 
     private $entityManager;
     private $planRepository;
+    private CustomerRepository $customerRepository;
     private LegalTermsVersionProvider $legalTermsVersionProvider;
     private SignupAlertMailer $signupAlertMailer;
 
-    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
+    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, CustomerRepository $customerRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
     {
         $this->entityManager = $entityManager;
         $this->planRepository = $planRepository;
+        $this->customerRepository = $customerRepository;
         $this->legalTermsVersionProvider = $legalTermsVersionProvider;
         $this->signupAlertMailer = $signupAlertMailer;
     }
@@ -89,6 +92,8 @@ class MerchantController extends AbstractController
             'is_owner' => $currentUser !== null && $merchant->getUser() === $currentUser,
             'active_loyalty_program_count' => $merchant->getActiveLoyaltyProgramCount(),
             'plan' => $this->formatPlan($merchant->getPlan()),
+            'is_free_account' => $merchant->isFreeAccount(),
+            'free_account_granted_at' => $merchant->getFreeAccountGrantedAt()?->format('Y-m-d\TH:i:s\Z'),
         ];
     }
 
@@ -106,8 +111,9 @@ class MerchantController extends AbstractController
         }
 
         $plan = $merchant->getPlan();
-        $customerCount = $merchant->getLoyaltyCards()->count();
+        $customerCount = $this->customerRepository->countByMerchant($merchant);
         $programCount = $merchant->getLoyaltyPrograms()->count();
+        $isFreeAccount = $merchant->isFreeAccount();
 
         return new JsonResponse([
             'plan' => $this->formatPlan($plan),
@@ -116,9 +122,10 @@ class MerchantController extends AbstractController
                 'programs' => $programCount,
             ],
             'limits_reached' => [
-                'customers' => $plan !== null && $plan->getMaxCustomers() >= 0 && $customerCount >= $plan->getMaxCustomers(),
-                'programs' => $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
+                'customers' => !$isFreeAccount && $plan !== null && $plan->getMaxCustomers() >= 0 && $customerCount >= $plan->getMaxCustomers(),
+                'programs' => !$isFreeAccount && $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
             ],
+            'is_free_account' => $isFreeAccount,
         ]);
     }
 
@@ -242,9 +249,23 @@ class MerchantController extends AbstractController
             return new JsonResponse(['error' => 'accepted_terms_accepted_at must be a valid datetime'], 422);
         }
 
+        $resolvedEmail = null;
+        if (array_key_exists('email', $data) && $data['email'] !== null) {
+            if (!is_string($data['email'])) {
+                return new JsonResponse(['error' => 'email must be a string'], 400);
+            }
+            $resolvedEmail = trim(mb_strtolower($data['email']));
+        }
+        if ($resolvedEmail === null || $resolvedEmail === '') {
+            $resolvedEmail = mb_strtolower((string) ($user->getEmail() ?? ''));
+        }
+        if ($resolvedEmail === '' || !filter_var($resolvedEmail, FILTER_VALIDATE_EMAIL)) {
+            return new JsonResponse(['error' => 'email must be a valid non-empty email'], 422);
+        }
+
         $merchant = new Merchant();
         $merchant->setCompanyName(trim($data['company_name']));
-        $merchant->setEmail($data['email'] ?? $user->getEmail());
+        $merchant->setEmail($resolvedEmail);
         $merchant->setPhone($data['phone'] ?? null);
         $merchant->setAddress($data['address'] ?? null);
         $merchant->setPostalCode(trim($data['postal_code']));

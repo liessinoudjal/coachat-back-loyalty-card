@@ -88,6 +88,55 @@ final class SuperAdminControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(403);
     }
 
+    public function testSuperAdminCanCreateUnclaimedMerchantWithoutEmail(): void
+    {
+        if (!$this->isMerchantUserIdNullable()) {
+            self::markTestSkipped('La colonne merchant.user_id est NOT NULL dans la base de test. Appliquer les migrations pour tester le flux non réclamé.');
+        }
+
+        $client = static::createClient();
+
+        $superAdmin = $this->createUser('create-unclaimed-no-email', ['ROLE_USER', 'ROLE_SUPER_ADMIN']);
+
+        $client->request('POST', '/api/super-admin/merchants', server: [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $this->createJwtFor($superAdmin),
+        ], content: json_encode([
+            'company_name' => 'Ghost Merchant',
+            'address' => '10 rue des Tests',
+            'postal_code' => '45000',
+            'city' => 'Orleans',
+        ], JSON_THROW_ON_ERROR));
+
+        self::assertResponseStatusCodeSame(201);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame('Ghost Merchant', $payload['company_name']);
+        self::assertNull($payload['email']);
+        self::assertFalse($payload['is_claimed']);
+        self::assertNull($payload['user']);
+    }
+
+    public function testSuperAdminCannotClearEmailOnClaimedMerchant(): void
+    {
+        $client = static::createClient();
+
+        $superAdmin = $this->createUser('clear-claimed-email-admin', ['ROLE_USER', 'ROLE_SUPER_ADMIN']);
+        $merchantUser = $this->createUser('clear-claimed-email-owner', ['ROLE_USER', 'ROLE_MERCHANT']);
+        $merchant = $this->createMerchant($merchantUser, 'Claimed Shop', 'Tours');
+
+        $client->request('PUT', '/api/super-admin/merchants/' . $merchant->getId()?->toRfc4122() . '/claim-email', server: [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_AUTHORIZATION' => 'Bearer ' . $this->createJwtFor($superAdmin),
+        ], content: json_encode([
+            'email' => '',
+        ], JSON_THROW_ON_ERROR));
+
+        self::assertResponseStatusCodeSame(409);
+        $payload = json_decode((string) $client->getResponse()->getContent(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('claimed_merchant_email_required', $payload['error']);
+    }
+
     public function testSuperAdminInheritsMerchantPermissions(): void
     {
         $client = static::createClient();
@@ -278,5 +327,22 @@ final class SuperAdminControllerTest extends WebTestCase
         $entityManager = static::getContainer()->get(EntityManagerInterface::class);
 
         return $entityManager;
+    }
+
+    private function isMerchantUserIdNullable(): bool
+    {
+        $connection = $this->getEntityManager()->getConnection();
+        $databaseName = (string) $connection->fetchOne('SELECT DATABASE()');
+
+        $isNullable = $connection->fetchOne(
+            'SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :tableName AND COLUMN_NAME = :columnName',
+            [
+                'schema' => $databaseName,
+                'tableName' => 'merchant',
+                'columnName' => 'user_id',
+            ],
+        );
+
+        return strtoupper((string) $isNullable) === 'YES';
     }
 }

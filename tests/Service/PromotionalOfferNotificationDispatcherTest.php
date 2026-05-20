@@ -13,8 +13,10 @@ use App\Repository\CustomerRepository;
 use App\Repository\PromotionalOfferRepository;
 use App\Service\NotificationService;
 use App\Service\PromotionalOfferNotificationDispatcher;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 
 final class PromotionalOfferNotificationDispatcherTest extends TestCase
 {
@@ -24,6 +26,7 @@ final class PromotionalOfferNotificationDispatcherTest extends TestCase
         $customerRepository = $this->createMock(CustomerRepository::class);
         $preferenceRepository = $this->createMock(CustomerMerchantNotificationPreferenceRepository::class);
         $notificationService = $this->createMock(NotificationService::class);
+        $signupAlertMailer = $this->createMock(SignupAlertMailer::class);
         $entityManager = $this->createMock(EntityManagerInterface::class);
 
         $today = new \DateTimeImmutable('2026-05-09');
@@ -48,6 +51,12 @@ final class PromotionalOfferNotificationDispatcherTest extends TestCase
         $eligibleStartCustomer = (new Customer())->setName('A')->setEmail('a@example.com');
         $disabledStartCustomer = (new Customer())->setName('B')->setEmail('b@example.com');
         $eligibleEndingCustomer = (new Customer())->setName('C')->setEmail('c@example.com');
+
+        $offerRepository
+            ->expects(self::once())
+            ->method('findFlashOffersForDayBefore')
+            ->with($today->modify('+1 day'))
+            ->willReturn([]);
 
         $offerRepository
             ->expects(self::once())
@@ -104,12 +113,14 @@ final class PromotionalOfferNotificationDispatcherTest extends TestCase
         $notificationService
             ->expects(self::once())
             ->method('notifyPromotionalOfferStarts')
-            ->with($eligibleStartCustomer, $merchantStart, $startOffer);
+            ->with($eligibleStartCustomer, $merchantStart, $startOffer)
+            ->willReturn(true);
 
         $notificationService
             ->expects(self::once())
             ->method('notifyPromotionalOfferEndingSoon')
-            ->with($eligibleEndingCustomer, $merchantEnding, $endingOffer);
+            ->with($eligibleEndingCustomer, $merchantEnding, $endingOffer)
+            ->willReturn(true);
 
         $entityManager->expects(self::once())->method('flush');
 
@@ -118,7 +129,9 @@ final class PromotionalOfferNotificationDispatcherTest extends TestCase
             $customerRepository,
             $preferenceRepository,
             $notificationService,
+            $signupAlertMailer,
             $entityManager,
+            new NullLogger(),
         );
 
         $result = $dispatcher->dispatch($today);

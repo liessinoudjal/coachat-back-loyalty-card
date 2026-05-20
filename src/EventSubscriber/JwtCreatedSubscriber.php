@@ -32,6 +32,7 @@ final class JwtCreatedSubscriber
         $data['roles'] = $roles;
         $data['all_roles'] = $roles;
         $data['is_equipier'] = in_array('ROLE_EQUIPIER', $roles, true);
+        $data['is_owner'] = $merchant !== null;
         $data['merchant_id'] = $merchant?->getId()?->toRfc4122();
         $data['equipier_merchant_id'] = $equipierMerchant?->getId()?->toRfc4122();
         $data['customer_id'] = $user->getCustomer()?->getId();

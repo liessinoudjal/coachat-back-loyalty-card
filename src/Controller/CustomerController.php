@@ -4,13 +4,18 @@ namespace App\Controller;
 
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
+use App\Entity\GoogleReviewEvent;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\PromotionalOffer;
 use App\Entity\Reward;
+use App\Enum\GoogleReviewEventType;
+use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\PromotionalOfferRepository;
 use App\Service\CustomerMerchantLinker;
+use App\Service\GoogleReviewJourneyService;
 use App\Service\NotificationService;
+use App\Service\SignupAlertMailer;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,16 +28,22 @@ class CustomerController extends AbstractController
     private $entityManager;
     private $notificationService;
     private $customerMerchantLinker;
+    private $signupAlertMailer;
+    private $googleReviewJourneyService;
 
     public function __construct(
         EntityManagerInterface $entityManager,
         NotificationService $notificationService,
         CustomerMerchantLinker $customerMerchantLinker,
+        SignupAlertMailer $signupAlertMailer,
+        GoogleReviewJourneyService $googleReviewJourneyService,
     )
     {
         $this->entityManager = $entityManager;
         $this->notificationService = $notificationService;
         $this->customerMerchantLinker = $customerMerchantLinker;
+        $this->signupAlertMailer = $signupAlertMailer;
+        $this->googleReviewJourneyService = $googleReviewJourneyService;
     }
 
     #[Route('/api/customers', name: 'create_customer', methods: ['POST'])]
@@ -46,6 +57,8 @@ class CustomerController extends AbstractController
         return new JsonResponse([
             'error' => 'manual_customer_creation_disabled',
             'message' => 'Customer signup is available only via Google auth with merchant_ref QR flow.',
+            'next_action' => 'use_google_customer_auth',
+            'help' => 'If the customer already has a Google account on La Carte, ask them to log in with Google then open the merchant QR/link to join the new merchant.',
         ], 403);
     }
 
@@ -79,7 +92,27 @@ class CustomerController extends AbstractController
             return new JsonResponse(['error' => 'merchant_not_found'], 404);
         }
 
-        $this->customerMerchantLinker->link($customer, $merchant);
+        try {
+            $this->customerMerchantLinker->link($customer, $merchant);
+        } catch (CustomerMerchantLimitReachedException $exception) {
+            $this->signupAlertMailer->notifyMerchantSignupRefusedDueToCustomerLimit(
+                $merchant,
+                $customer,
+                $exception->getCurrentCustomers(),
+                $exception->getMaxCustomers(),
+                'espace client',
+            );
+
+            return new JsonResponse([
+                'error' => $exception->getMessage(),
+                'message' => sprintf(
+                    'Ce commerce a déjà atteint son plafond de %d abonnés pour son plan actuel.',
+                    $exception->getMaxCustomers(),
+                ),
+                'current_customers' => $exception->getCurrentCustomers(),
+                'max_customers' => $exception->getMaxCustomers(),
+            ], 409);
+        }
         $this->entityManager->flush();
 
         return new JsonResponse([
@@ -547,7 +580,7 @@ class CustomerController extends AbstractController
         }
 
         return new JsonResponse([
-            ...$this->formatMerchantCustomer($customer),
+            ...$this->formatMerchantCustomerDetail($customer, $merchant),
         ]);
     }
 
@@ -716,6 +749,7 @@ class CustomerController extends AbstractController
         $merchant = $card->getMerchant();
         $merchantId = $merchant?->getId()?->toRfc4122();
         $walletToken = $card->getWalletToken();
+        $program = $card->getLoyaltyProgram();
 
         return [
             'id' => $card->getId(),
@@ -730,10 +764,11 @@ class CustomerController extends AbstractController
                 'company_name' => $merchant->getCompanyName(),
                 'logo_url' => $merchant->getLogoUrl(),
             ] : null,
-            'loyalty_program' => $card->getLoyaltyProgram() ? [
-                'id' => $card->getLoyaltyProgram()->getId(),
-                'name' => $card->getLoyaltyProgram()->getName(),
-                'type' => $card->getLoyaltyProgram()->getType()->value,
+            'loyalty_program' => $program ? [
+                'id' => $program->getId(),
+                'name' => $program->getName(),
+                'type' => $program->getType()->value,
+                'card_background_image_url' => $program->getCardBackgroundImageUrl(),
             ] : null,
         ];
     }
@@ -766,6 +801,50 @@ class CustomerController extends AbstractController
             'equipier_merchant_id' => $customer->getStaffMerchant()?->getId()?->toRfc4122(),
             'equipier_assigned_at' => $customer->getStaffAssignedAt()?->format(DATE_ATOM),
             'roles' => $customer->getUser()?->getRoles() ?? ['ROLE_CUSTOMER'],
+        ];
+    }
+
+    private function formatMerchantCustomerDetail(Customer $customer, Merchant $merchant): array
+    {
+        $notificationPreference = $this->entityManager
+            ->getRepository(CustomerMerchantNotificationPreference::class)
+            ->findOneByCustomerAndMerchant($customer, $merchant);
+
+        /** @var GoogleReviewEvent|null $latestGoogleReviewClick */
+        $latestGoogleReviewClick = $this->entityManager
+            ->getRepository(GoogleReviewEvent::class)
+            ->findOneBy(
+                [
+                    'customer' => $customer,
+                    'merchant' => $merchant,
+                    'eventType' => GoogleReviewEventType::OUTBOUND_CLICKED,
+                ],
+                ['createdAt' => 'DESC'],
+            );
+
+        $latestGoogleReviewReward = $this->googleReviewJourneyService
+            ->getCurrentRewardForCustomerAndMerchant($customer, $merchant);
+
+        return [
+            ...$this->formatMerchantCustomer($customer),
+            'notifications' => $this->formatNotificationPreference($merchant, $notificationPreference),
+            'google_review' => [
+                'has_clicked_review_link' => $latestGoogleReviewClick instanceof GoogleReviewEvent,
+                'last_review_click_at' => $latestGoogleReviewClick?->getCreatedAt()?->format(DATE_ATOM),
+                'latest_reward' => $latestGoogleReviewReward ? [
+                    'status' => $latestGoogleReviewReward->getStatus()->value,
+                    'label' => $latestGoogleReviewReward->getRewardLabel(),
+                    'description' => $latestGoogleReviewReward->getRewardDescription(),
+                    'created_at' => $latestGoogleReviewReward->getCreatedAt()?->format(DATE_ATOM),
+                    'redeemed_at' => $latestGoogleReviewReward->getRedeemedAt()?->format(DATE_ATOM),
+                    'expires_at' => $latestGoogleReviewReward->getExpiresAt()?->format(DATE_ATOM),
+                ] : null,
+            ],
+            'terms' => [
+                'accepted' => $customer->isAcceptedTerms(),
+                'accepted_version' => $customer->getAcceptedTermsVersion(),
+                'accepted_at' => $customer->getAcceptedTermsAcceptedAt()?->format(DATE_ATOM),
+            ],
         ];
     }
 
