@@ -21,6 +21,11 @@ class CustomerMerchantLinker
 
     public function assertMerchantCanAcceptCustomer(Merchant $merchant): void
     {
+        // Compte gratuit accordé par un super-admin : aucune limite ne s'applique.
+        if ($merchant->isFreeAccount()) {
+            return;
+        }
+
         $plan = $merchant->getPlan();
         if ($plan === null || $plan->getMaxCustomers() < 0) {
             return;

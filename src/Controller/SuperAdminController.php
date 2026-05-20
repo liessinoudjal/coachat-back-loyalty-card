@@ -417,6 +417,39 @@ class SuperAdminController extends AbstractController
         ]);
     }
 
+    #[Route('/api/super-admin/merchants/{merchantId}/free-account', name: 'super_admin_merchants_set_free_account', methods: ['PATCH'])]
+    public function setMerchantFreeAccount(string $merchantId, Request $request): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $merchant = $this->merchantRepository->find($merchantId);
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'merchant_not_found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data) || !array_key_exists('enabled', $data)) {
+            return new JsonResponse(['error' => 'enabled_required'], 422);
+        }
+
+        $enabled = (bool) $data['enabled'];
+        $currentUser = $this->getUser();
+
+        $merchant->setIsFreeAccount($enabled);
+        if ($enabled) {
+            $merchant->setFreeAccountGrantedAt(new \DateTime());
+            $merchant->setFreeAccountGrantedBy($currentUser instanceof User ? $currentUser : null);
+        } else {
+            $merchant->setFreeAccountGrantedAt(null);
+            $merchant->setFreeAccountGrantedBy(null);
+        }
+
+        $this->em->persist($merchant);
+        $this->em->flush();
+
+        return new JsonResponse($this->formatMerchant($merchant));
+    }
+
     #[Route('/api/super-admin/merchants/{merchantId}', name: 'super_admin_merchants_delete', methods: ['DELETE'])]
     public function deleteMerchant(string $merchantId): JsonResponse
     {
@@ -497,6 +530,13 @@ class SuperAdminController extends AbstractController
                 'email' => $user->getEmail(),
                 'name' => $user->getName(),
                 'roles' => $user->getRoles(),
+            ] : null,
+            'is_free_account' => $merchant->isFreeAccount(),
+            'free_account_granted_at' => $merchant->getFreeAccountGrantedAt()?->format('Y-m-d\TH:i:s\Z'),
+            'free_account_granted_by' => $merchant->getFreeAccountGrantedBy() ? [
+                'id' => $merchant->getFreeAccountGrantedBy()->getId(),
+                'email' => $merchant->getFreeAccountGrantedBy()->getEmail(),
+                'name' => $merchant->getFreeAccountGrantedBy()->getName(),
             ] : null,
         ];
     }

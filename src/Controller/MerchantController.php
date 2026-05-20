@@ -92,6 +92,8 @@ class MerchantController extends AbstractController
             'is_owner' => $currentUser !== null && $merchant->getUser() === $currentUser,
             'active_loyalty_program_count' => $merchant->getActiveLoyaltyProgramCount(),
             'plan' => $this->formatPlan($merchant->getPlan()),
+            'is_free_account' => $merchant->isFreeAccount(),
+            'free_account_granted_at' => $merchant->getFreeAccountGrantedAt()?->format('Y-m-d\TH:i:s\Z'),
         ];
     }
 
@@ -111,6 +113,7 @@ class MerchantController extends AbstractController
         $plan = $merchant->getPlan();
         $customerCount = $this->customerRepository->countByMerchant($merchant);
         $programCount = $merchant->getLoyaltyPrograms()->count();
+        $isFreeAccount = $merchant->isFreeAccount();
 
         return new JsonResponse([
             'plan' => $this->formatPlan($plan),
@@ -119,9 +122,10 @@ class MerchantController extends AbstractController
                 'programs' => $programCount,
             ],
             'limits_reached' => [
-                'customers' => $plan !== null && $plan->getMaxCustomers() >= 0 && $customerCount >= $plan->getMaxCustomers(),
-                'programs' => $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
+                'customers' => !$isFreeAccount && $plan !== null && $plan->getMaxCustomers() >= 0 && $customerCount >= $plan->getMaxCustomers(),
+                'programs' => !$isFreeAccount && $plan !== null && $plan->getMaxPrograms() >= 0 && $programCount >= $plan->getMaxPrograms(),
             ],
+            'is_free_account' => $isFreeAccount,
         ]);
     }
 

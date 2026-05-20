@@ -283,9 +283,10 @@ class NotificationService
 
     private function resolveChannel(Merchant $merchant): NotificationChannel
     {
-        return $merchant->getPlan()?->isHasPushNotifications()
-            ? NotificationChannel::PUSH
-            : NotificationChannel::EMAIL;
+        // Free account = accès aux fonctionnalités premium dont les notifications push.
+        $pushEnabled = $merchant->isFreeAccount() || (bool) $merchant->getPlan()?->isHasPushNotifications();
+
+        return $pushEnabled ? NotificationChannel::PUSH : NotificationChannel::EMAIL;
     }
 
     private function buildCustomerDashboardUrl(): string

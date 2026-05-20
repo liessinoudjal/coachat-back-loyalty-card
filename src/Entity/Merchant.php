@@ -98,7 +98,20 @@ class Merchant
 
     #[ORM\Column(type: 'float', nullable: true)]
     private ?float $geocodeScore = null;
+    /**
+     * Compte gratuit accordé manuellement par un super-admin : exonère ce
+     * merchant des plafonds de plan (clients, programmes, …) et des
+     * blocages liés au subscription_status (canceled / trial expiré).
+     */
+    #[ORM\Column(options: ['default' => false])]
+    private bool $isFreeAccount = false;
 
+    #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
+    private ?\DateTimeInterface $freeAccountGrantedAt = null;
+
+    #[ORM\ManyToOne(targetEntity: User::class)]
+    #[ORM\JoinColumn(name: 'free_account_granted_by_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    private ?User $freeAccountGrantedBy = null;
     public function __construct()
     {
         $this->id = Uuid::v4();
@@ -535,6 +548,42 @@ class Merchant
     public function setPlan(?Plan $plan): static
     {
         $this->plan = $plan;
+
+        return $this;
+    }
+
+    public function isFreeAccount(): bool
+    {
+        return $this->isFreeAccount;
+    }
+
+    public function setIsFreeAccount(bool $isFreeAccount): static
+    {
+        $this->isFreeAccount = $isFreeAccount;
+
+        return $this;
+    }
+
+    public function getFreeAccountGrantedAt(): ?\DateTimeInterface
+    {
+        return $this->freeAccountGrantedAt;
+    }
+
+    public function setFreeAccountGrantedAt(?\DateTimeInterface $freeAccountGrantedAt): static
+    {
+        $this->freeAccountGrantedAt = $freeAccountGrantedAt;
+
+        return $this;
+    }
+
+    public function getFreeAccountGrantedBy(): ?User
+    {
+        return $this->freeAccountGrantedBy;
+    }
+
+    public function setFreeAccountGrantedBy(?User $freeAccountGrantedBy): static
+    {
+        $this->freeAccountGrantedBy = $freeAccountGrantedBy;
 
         return $this;
     }

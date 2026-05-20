@@ -187,7 +187,7 @@ class AuthController extends AbstractController
             if ($linkedMerchant === null) {
                 return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
             }
-            if ($linkedMerchant->getSubscriptionStatus() === 'canceled') {
+            if ($linkedMerchant->getSubscriptionStatus() === 'canceled' && !$linkedMerchant->isFreeAccount()) {
                 return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
             }
 
@@ -261,7 +261,7 @@ class AuthController extends AbstractController
         if ($merchant === null) {
             return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
         }
-        if ($merchant->getSubscriptionStatus() === 'canceled') {
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
@@ -590,7 +590,7 @@ class AuthController extends AbstractController
         if ($merchant === null) {
             return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
         }
-        if ($merchant->getSubscriptionStatus() === 'canceled') {
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
@@ -637,7 +637,7 @@ class AuthController extends AbstractController
         if ($merchant === null) {
             return new JsonResponse(['error' => 'merchant_ref_invalid'], 422);
         }
-        if ($merchant->getSubscriptionStatus() === 'canceled') {
+        if ($merchant->getSubscriptionStatus() === 'canceled' && !$merchant->isFreeAccount()) {
             return new JsonResponse(['error' => 'merchant_ref_inactive'], 422);
         }
 
