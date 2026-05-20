@@ -5,7 +5,9 @@ namespace App\Service;
 use App\Entity\Contest;
 use App\Entity\ContestParticipation;
 use App\Entity\ContestReward;
+use App\Entity\ContestRewardCard;
 use App\Entity\ContestWinner;
+use App\Enum\ContestRewardType;
 use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRewardRepository;
@@ -66,6 +68,24 @@ class ContestDrawService
         $winner->setQrCodeToken($this->generateQrToken());
 
         $this->entityManager->persist($winner);
+
+        if (in_array($reward->getType(), [ContestRewardType::CARD_STAMP, ContestRewardType::CARD_POINT], true)
+            && ($reward->getTargetValue() ?? 0) > 0
+            && $contest->getMerchant() !== null
+            && $winner->getCustomer() !== null
+        ) {
+            $card = new ContestRewardCard();
+            $card->setContestWinner($winner);
+            $card->setCustomer($winner->getCustomer());
+            $card->setMerchant($contest->getMerchant());
+            $card->setType($reward->getType());
+            $card->setTitle($reward->getTitle());
+            $card->setRewardDescription($reward->getRewardDescription());
+            $card->setTargetValue((int) $reward->getTargetValue());
+            $card->setCurrentValue(0);
+            $card->setIsCompleted(false);
+            $this->entityManager->persist($card);
+        }
 
         if ($this->findNextReward($contest, $reward) === null) {
             $contest->setStatus(ContestStatus::FINISHED);

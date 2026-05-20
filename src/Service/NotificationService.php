@@ -3,6 +3,7 @@
 namespace App\Service;
 
 use App\Entity\Contest;
+use App\Entity\ContestRewardCard;
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
@@ -168,6 +169,33 @@ class NotificationService
                 'dashboard_url' => $this->buildCustomerDashboardUrl(),
                 'reward_description' => $reward->getRewardDescription() ?? 'Votre récompense',
                 'program_name' => $program?->getName() ?? 'Carte fidélité',
+            ],
+        );
+    }
+
+    public function notifyContestCardValueAdded(ContestRewardCard $card, int $valueAdded): void
+    {
+        $customer = $card->getCustomer();
+        $merchant = $card->getMerchant();
+
+        if (!$customer instanceof Customer || !$merchant instanceof Merchant) {
+            return;
+        }
+
+        $unitLabel = $card->getType()->value === 'CARD_STAMP' ? 'tampons' : 'points';
+
+        $this->send(
+            $merchant,
+            $customer,
+            NotificationType::POINTS_ADDED,
+            [
+                'transaction_id' => null,
+                'value_added' => max(0, $valueAdded),
+                'unit_label' => $unitLabel,
+                'current_value' => $card->getCurrentValue(),
+                'target_value' => $card->getTargetValue(),
+                'reward_ready' => $card->isCompleted(),
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
             ],
         );
     }
