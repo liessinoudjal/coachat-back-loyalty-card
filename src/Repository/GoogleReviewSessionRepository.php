@@ -37,7 +37,7 @@ class GoogleReviewSessionRepository extends ServiceEntityRepository
             ->andWhere('session.merchant = :merchant')
             ->andWhere('session.status IN (:statuses)')
             ->setParameter('customer', $customer)
-            ->setParameter('merchant', $merchant)
+            ->setParameter('merchant', $merchant->getId(), 'uuid')
             ->setParameter('statuses', [
                 GoogleReviewSessionStatus::READY_TO_LAUNCH,
                 GoogleReviewSessionStatus::OUTBOUND_OPENED,

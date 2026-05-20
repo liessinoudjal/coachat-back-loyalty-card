@@ -39,7 +39,7 @@ class GoogleReviewRewardRepository extends ServiceEntityRepository
             ->andWhere('reward.customer = :customer')
             ->andWhere('reward.merchant = :merchant')
             ->setParameter('customer', $customer)
-            ->setParameter('merchant', $merchant)
+            ->setParameter('merchant', $merchant->getId(), 'uuid')
             ->orderBy('reward.createdAt', 'DESC')
             ->setMaxResults(1)
             ->getQuery()

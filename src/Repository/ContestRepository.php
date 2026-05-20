@@ -101,4 +101,65 @@ class ContestRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * Visible contests for the public WMCP API: scheduled or active contests
+     * that have not yet ended. Eagerly loads rewards.
+     *
+     * @param Merchant[] $merchants
+     * @return Contest[]
+     */
+    public function findVisibleForMerchants(array $merchants, \DateTimeImmutable $now): array
+    {
+        if (empty($merchants)) {
+            return [];
+        }
+
+        return $this->createQueryBuilder('contest')
+            ->distinct()
+            ->addSelect('reward')
+            ->leftJoin('contest.rewards', 'reward')
+            ->andWhere('contest.merchant IN (:merchants)')
+            ->andWhere('contest.status IN (:statuses)')
+            ->andWhere('contest.endAt >= :now')
+            ->setParameter('merchants', $merchants)
+            ->setParameter('statuses', [ContestStatus::SCHEDULED->value, ContestStatus::ACTIVE->value])
+            ->setParameter('now', $now, 'datetime_immutable')
+            ->orderBy('contest.startAt', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Visible contests across claimed merchants for the public WMCP listing endpoint.
+     *
+     * @return Contest[]
+     */
+    public function findVisibleForPublicListing(
+        \DateTimeImmutable $now,
+        ?Merchant $merchant = null,
+        int $limit = 50,
+        int $offset = 0,
+    ): array {
+        $qb = $this->createQueryBuilder('contest')
+            ->distinct()
+            ->addSelect('reward', 'merchant')
+            ->leftJoin('contest.rewards', 'reward')
+            ->innerJoin('contest.merchant', 'merchant')
+            ->andWhere('merchant.user IS NOT NULL')
+            ->andWhere('contest.status IN (:statuses)')
+            ->andWhere('contest.endAt >= :now')
+            ->setParameter('statuses', [ContestStatus::SCHEDULED->value, ContestStatus::ACTIVE->value])
+            ->setParameter('now', $now, 'datetime_immutable')
+            ->orderBy('contest.startAt', 'ASC')
+            ->setMaxResults($limit)
+            ->setFirstResult($offset);
+
+        if ($merchant !== null) {
+            $qb->andWhere('IDENTITY(contest.merchant) = :merchantId')
+                ->setParameter('merchantId', $merchant->getId(), 'uuid');
+        }
+
+        return $qb->getQuery()->getResult();
+    }
 }

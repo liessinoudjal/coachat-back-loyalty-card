@@ -34,7 +34,7 @@
       "get": {
         "tags": ["Public"],
         "summary": "Get claimed merchants map",
-        "description": "Discover claimed merchants only with geolocation, loyalty programs, promotional offers, and Google Reviews configuration. Unclaimed merchants are excluded.",
+        "description": "Discover claimed merchants only with geolocation, loyalty programs, promotional offers, scheduled and active contests, and Google Reviews configuration. Unclaimed merchants are excluded.",
         "operationId": "getWmcpClaimedMerchantsMap",
         "parameters": [
           {
@@ -139,6 +139,72 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/public/wmcp/contests": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "List public contests with rewards",
+        "description": "List scheduled and active contests (jeux concours) across claimed merchants, including the contest schedule and every reward (lot) to win. Useful for AI discovery and aggregators.",
+        "operationId": "getWmcpPublicContests",
+        "parameters": [
+          {
+            "name": "merchant_id",
+            "in": "query",
+            "description": "Restrict listing to a single merchant (UUID)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of contests (default 50, max 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Pagination offset (default 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of public contests with rewards",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicContestsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded"
           }
         }
       }
@@ -261,6 +327,13 @@
               "$ref": "#/components/schemas/MapActiveOffer"
             },
             "description": "Active promotional offers"
+          },
+          "active_contests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicContest"
+            },
+            "description": "Scheduled or active contests (jeux concours) with the list of rewards to win"
           },
           "google_review": {
             "oneOf": [
@@ -447,6 +520,92 @@
           "message": {
             "type": "string",
             "description": "Detailed error message"
+          }
+        }
+      },
+      "PublicContestsResponse": {
+        "type": "object",
+        "description": "Response payload for the public contests listing endpoint",
+        "required": ["contests", "total"],
+        "properties": {
+          "contests": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicContestWithMerchant" }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Number of contests returned in this page"
+          }
+        }
+      },
+      "PublicContest": {
+        "type": "object",
+        "description": "A contest (jeu concours) organised by a merchant, with the list of rewards to win",
+        "required": ["id", "title", "status", "start_at", "end_at", "rewards"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string", "example": "Tirage de printemps" },
+          "description": { "type": ["string", "null"], "example": "Tentez de gagner notre menu signature." },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "scheduled", "active", "finished"],
+            "description": "Contest lifecycle status. Only scheduled and active contests are exposed publicly."
+          },
+          "start_at": { "type": "string", "format": "date-time" },
+          "end_at": { "type": "string", "format": "date-time" },
+          "draw_at": { "type": ["string", "null"], "format": "date-time" },
+          "rewards": {
+            "type": "array",
+            "description": "Rewards (lots) to win, ordered by rank ascending (rank #1 = top prize)",
+            "items": { "$ref": "#/components/schemas/PublicContestReward" }
+          }
+        }
+      },
+      "PublicContestWithMerchant": {
+        "allOf": [
+          { "$ref": "#/components/schemas/PublicContest" },
+          {
+            "type": "object",
+            "required": ["merchant"],
+            "properties": {
+              "merchant": {
+                "type": "object",
+                "description": "Merchant organising the contest",
+                "required": ["id", "company_name"],
+                "properties": {
+                  "id": { "type": "string", "format": "uuid" },
+                  "company_name": { "type": "string" },
+                  "city": { "type": ["string", "null"] },
+                  "postal_code": { "type": ["string", "null"] },
+                  "latitude": { "type": ["number", "null"], "format": "float" },
+                  "longitude": { "type": ["number", "null"], "format": "float" },
+                  "logo_url": { "type": ["string", "null"] }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "PublicContestReward": {
+        "type": "object",
+        "description": "One reward (lot) inside a contest. Type TEXT is a free-form prize; CARD_STAMP / CARD_POINT grant a dedicated loyalty card to the winner.",
+        "required": ["rank", "title", "type"],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1, "example": 1 },
+          "title": { "type": "string", "example": "Menu signature offert" },
+          "type": {
+            "type": "string",
+            "enum": ["TEXT", "CARD_STAMP", "CARD_POINT"],
+            "description": "Reward kind: TEXT (simple prize), CARD_STAMP (loyalty stamp card), CARD_POINT (loyalty point card / store credit)"
+          },
+          "image_url": { "type": ["string", "null"] },
+          "target_value": {
+            "type": ["integer", "null"],
+            "description": "For CARD_STAMP: number of stamps targeted. For CARD_POINT: amount in cents to accumulate (e.g. 5000 = 50\u20ac)."
+          },
+          "reward_description": {
+            "type": ["string", "null"],
+            "description": "Short description of what the winner gets (e.g. '1 menu offert par tampon', '1\u20ac de remise par point')"
           }
         }
       }

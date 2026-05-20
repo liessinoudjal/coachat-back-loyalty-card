@@ -87,6 +87,7 @@ class ContestParticipationServiceTest extends KernelTestCase
         $card->setCustomer($customer);
         $card->setLoyaltyProgram($program);
         $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
         $this->entityManager->persist($card);
 
         $this->entityManager->flush();
@@ -150,6 +151,7 @@ class ContestParticipationServiceTest extends KernelTestCase
         $card->setCustomer($customer);
         $card->setLoyaltyProgram($program);
         $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
         $this->entityManager->persist($card);
 
         $this->entityManager->flush();
@@ -216,6 +218,7 @@ class ContestParticipationServiceTest extends KernelTestCase
         $card->setCustomer($customer);
         $card->setLoyaltyProgram($program);
         $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
         $this->entityManager->persist($card);
 
         $this->entityManager->flush();
@@ -320,6 +323,7 @@ class ContestParticipationServiceTest extends KernelTestCase
         $card->setCustomer($customer);
         $card->setLoyaltyProgram($program);
         $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
         $this->entityManager->persist($card);
         $this->entityManager->flush();
 
@@ -337,5 +341,134 @@ class ContestParticipationServiceTest extends KernelTestCase
 
         $participationCount = $this->participationRepository->countByContestAndCustomer($contest, $customer);
         $this->assertSame(ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER, $participationCount);
+    }
+
+    public function testSkipsEndedContests(): void
+    {
+        $user = new User();
+        $user->setEmail($this->uniqueEmail('merchant'));
+        $user->setPassword(password_hash('password', PASSWORD_BCRYPT));
+        $user->setRoles(['ROLE_MERCHANT']);
+        $this->entityManager->persist($user);
+
+        $merchant = new Merchant();
+        $merchant->setCompanyName('Test Merchant');
+        $merchant->setUser($user);
+        $this->entityManager->persist($merchant);
+
+        $now = new \DateTimeImmutable();
+        $endedContest = new Contest();
+        $endedContest->setMerchant($merchant);
+        $endedContest->setTitle('Ended Contest');
+        $endedContest->setStatus(ContestStatus::ACTIVE);
+        $endedContest->setStartAt($now->modify('-10 days'));
+        $endedContest->setEndAt($now->modify('-1 day'));
+        $this->entityManager->persist($endedContest);
+
+        $customer = new Customer();
+        $customer->setName('Test Customer');
+        $customer->setEmail($this->uniqueEmail('customer'));
+        $this->entityManager->persist($customer);
+
+        $program = new LoyaltyProgram();
+        $program->setMerchant($merchant);
+        $program->setName('Test Program');
+        $program->setType(LoyaltyProgramType::STAMP);
+        $program->setStampTarget(10);
+        $this->entityManager->persist($program);
+
+        $card = new LoyaltyCard();
+        $card->setMerchant($merchant);
+        $card->setCustomer($customer);
+        $card->setLoyaltyProgram($program);
+        $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
+        $this->entityManager->persist($card);
+
+        $this->entityManager->flush();
+
+        $transaction = new Transaction();
+        $transaction->setMerchant($merchant);
+        $transaction->setLoyaltyCard($card);
+        $transaction->setPointsEarned(1);
+        $transaction->setPointsRedeemed(0);
+        $this->entityManager->persist($transaction);
+        $this->entityManager->flush();
+
+        $this->service->autoEnrollInActiveContests($transaction);
+
+        $count = $this->participationRepository->countByContestAndCustomer($endedContest, $customer);
+        $this->assertSame(0, $count, 'A contest whose endAt is in the past must not enroll new participations.');
+    }
+
+    public function testDoesNotEnrollInOtherMerchantContests(): void
+    {
+        // Merchant A — owns the scanned card
+        $userA = new User();
+        $userA->setEmail($this->uniqueEmail('merchant-a'));
+        $userA->setPassword(password_hash('password', PASSWORD_BCRYPT));
+        $userA->setRoles(['ROLE_MERCHANT']);
+        $this->entityManager->persist($userA);
+
+        $merchantA = new Merchant();
+        $merchantA->setCompanyName('Merchant A');
+        $merchantA->setUser($userA);
+        $this->entityManager->persist($merchantA);
+
+        // Merchant B — has an unrelated active contest that should be ignored
+        $userB = new User();
+        $userB->setEmail($this->uniqueEmail('merchant-b'));
+        $userB->setPassword(password_hash('password', PASSWORD_BCRYPT));
+        $userB->setRoles(['ROLE_MERCHANT']);
+        $this->entityManager->persist($userB);
+
+        $merchantB = new Merchant();
+        $merchantB->setCompanyName('Merchant B');
+        $merchantB->setUser($userB);
+        $this->entityManager->persist($merchantB);
+
+        $now = new \DateTimeImmutable();
+        $contestB = new Contest();
+        $contestB->setMerchant($merchantB);
+        $contestB->setTitle('Other Merchant Contest');
+        $contestB->setStatus(ContestStatus::ACTIVE);
+        $contestB->setStartAt($now->modify('-1 day'));
+        $contestB->setEndAt($now->modify('+5 days'));
+        $this->entityManager->persist($contestB);
+
+        $customer = new Customer();
+        $customer->setName('Test Customer');
+        $customer->setEmail($this->uniqueEmail('customer'));
+        $this->entityManager->persist($customer);
+
+        $programA = new LoyaltyProgram();
+        $programA->setMerchant($merchantA);
+        $programA->setName('Program A');
+        $programA->setType(LoyaltyProgramType::STAMP);
+        $programA->setStampTarget(10);
+        $this->entityManager->persist($programA);
+
+        $card = new LoyaltyCard();
+        $card->setMerchant($merchantA);
+        $card->setCustomer($customer);
+        $card->setLoyaltyProgram($programA);
+        $card->setWalletToken('wallet-' . uniqid());
+        $card->setCurrentValue(0);
+        $this->entityManager->persist($card);
+
+        $this->entityManager->flush();
+
+        $transaction = new Transaction();
+        $transaction->setMerchant($merchantA);
+        $transaction->setLoyaltyCard($card);
+        $transaction->setPointsEarned(1);
+        $transaction->setPointsRedeemed(0);
+        $this->entityManager->persist($transaction);
+        $this->entityManager->flush();
+
+        $this->service->autoEnrollInActiveContests($transaction);
+
+        $count = $this->participationRepository->countByContestAndCustomer($contestB, $customer);
+        $this->assertSame(0, $count, 'Scanning a card for merchant A must not enroll the customer in merchant B contests.');
     }
 }

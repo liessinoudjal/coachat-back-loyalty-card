@@ -43,7 +43,7 @@ class ContestRewardCardRepository extends ServiceEntityRepository
     {
         return $this->createQueryBuilder('c')
             ->andWhere('c.merchant = :merchant')
-            ->setParameter('merchant', $merchant)
+            ->setParameter('merchant', $merchant->getId(), 'uuid')
             ->orderBy('c.createdAt', 'DESC')
             ->getQuery()
             ->getResult();

@@ -21,4 +21,5 @@ enum NotificationType: string
     case CONTEST_ENDING_SOON = 'contest_ending_soon';
     case CONTEST_DRAW_DAY = 'contest_draw_day';
     case CONTEST_PARTICIPATION_UPDATED = 'contest_participation_updated';
+    case CONTEST_WINNER = 'contest_winner';
 }

@@ -542,7 +542,7 @@ class MerchantContestController extends AbstractController
         }
 
         $winners = [];
-        if ($contest->getStatus() === ContestStatus::FINISHED) {
+        if (in_array($contest->getStatus(), [ContestStatus::ACTIVE, ContestStatus::FINISHED], true)) {
             $winners = array_map(
                 fn (ContestWinner $winner) => $this->formatWinner($winner),
                 $this->winnerRepository->findByContest($contest),

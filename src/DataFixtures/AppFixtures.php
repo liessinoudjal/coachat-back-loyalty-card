@@ -28,7 +28,7 @@ class AppFixtures extends Fixture implements DependentFixtureInterface
         $freePlan = $this->getReference('plan_free', \App\Entity\Plan::class);
 
         $merchant = new Merchant();
-        $merchant->setCompanyName('coachat');
+        $merchant->setCompanyName('LAKARTE');
         $merchant->setEmail('liess.inoudjal@gmail.com');
         $merchant->setSubscriptionStatus('trial');
         $merchant->setTrialEndsAt((new \DateTime())->add(new \DateInterval('P30D')));
@@ -37,9 +37,13 @@ class AppFixtures extends Fixture implements DependentFixtureInterface
         $merchant->setAddress('3 rue des carmes');
         $merchant->setCity('Orléans');
         $merchant->setPostalCode('45000');
+        $merchant->setIsFreeAccount(true);
 
 
         $manager->persist($merchant);
+
         $manager->flush();
+
+        $this->addReference('merchant_main', $merchant);
     }
 }

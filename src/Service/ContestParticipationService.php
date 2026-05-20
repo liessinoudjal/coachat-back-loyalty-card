@@ -46,7 +46,7 @@ class ContestParticipationService
             ->andWhere('c.startAt <= :now')
             ->andWhere('c.endAt >= :now')
             ->andWhere('c.status != :draft')
-            ->setParameter('merchant', $merchant)
+            ->setParameter('merchant', $merchant->getId(), 'uuid')
             ->setParameter('now', $now)
             ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()

@@ -26,7 +26,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
         $queryBuilder = $this->createQueryBuilder('cp')
             ->where('cp.contest = :contest')
             ->andWhere('cp.isWinningEntry = false')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->orderBy('cp.createdAt', 'ASC');
 
         if ($excludedCustomerIds !== []) {
@@ -46,7 +46,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('cp')
             ->where('cp.contest = :contest')
             ->andWhere('cp.customer = :customer')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->setParameter('customer', $customer)
             ->orderBy('cp.createdAt', 'DESC')
             ->setMaxResults(1)
@@ -60,7 +60,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
             ->select('COUNT(cp.id)')
             ->where('cp.contest = :contest')
             ->andWhere('cp.customer = :customer')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->setParameter('customer', $customer)
             ->getQuery()
             ->getSingleScalarResult();
@@ -74,7 +74,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
         return (int) $this->createQueryBuilder('cp')
             ->select('COUNT(DISTINCT cp.customer)')
             ->where('cp.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->getQuery()
             ->getSingleScalarResult();
     }
@@ -87,7 +87,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
         return (int) $this->createQueryBuilder('cp')
             ->select('COUNT(cp)')
             ->where('cp.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->getQuery()
             ->getSingleScalarResult();
     }
@@ -100,7 +100,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
         $rows = $this->createQueryBuilder('cp')
             ->select('DISTINCT IDENTITY(cp.customer) AS customer_id')
             ->where('cp.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->getQuery()
             ->getArrayResult();
 
@@ -122,7 +122,7 @@ class ContestParticipationRepository extends ServiceEntityRepository
             ->addSelect('COUNT(cp.id) AS participation_count')
             ->innerJoin('cp.customer', 'customer')
             ->where('cp.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->groupBy('customer.id')
             ->addGroupBy('customer.name')
             ->addGroupBy('customer.email')

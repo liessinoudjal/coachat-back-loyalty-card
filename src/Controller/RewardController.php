@@ -56,7 +56,7 @@ class RewardController extends AbstractController
             return new JsonResponse(['error' => 'Forbidden'], 403);
         }
 
-        $qb->andWhere('r.merchant = :merchant')->setParameter('merchant', $merchant);
+        $qb->andWhere('r.merchant = :merchant')->setParameter('merchant', $merchant->getId(), 'uuid');
 
         if ($merchantFilter && $user) {
             $merchant = $this->entityManager->getRepository(Merchant::class)->find($merchantFilter);

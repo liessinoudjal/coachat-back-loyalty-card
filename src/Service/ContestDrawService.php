@@ -12,7 +12,9 @@ use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRewardRepository;
 use App\Repository\ContestWinnerRepository;
+use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Uid\Uuid;
 
 class ContestDrawService
@@ -22,6 +24,8 @@ class ContestDrawService
         private readonly ContestParticipationRepository $participationRepository,
         private readonly ContestRewardRepository $rewardRepository,
         private readonly ContestWinnerRepository $winnerRepository,
+        private readonly NotificationService $notificationService,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -93,7 +97,23 @@ class ContestDrawService
 
         $this->entityManager->flush();
 
+        $this->sendWinnerNotification($winner);
+
         return $winner;
+    }
+
+    private function sendWinnerNotification(ContestWinner $winner): void
+    {
+        try {
+            $this->notificationService->notifyContestWinner($winner);
+        } catch (\Throwable $exception) {
+            $this->logger->error('Failed to send contest winner notification.', [
+                'winner_id' => $winner->getId(),
+                'contest_id' => $winner->getContest()?->getId()?->toRfc4122(),
+                'customer_id' => $winner->getCustomer()?->getId(),
+                'exception' => $exception->getMessage(),
+            ]);
+        }
     }
 
     /**

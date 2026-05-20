@@ -4,6 +4,7 @@ namespace App\Service;
 
 use App\Entity\Contest;
 use App\Entity\ContestRewardCard;
+use App\Entity\ContestWinner;
 use App\Entity\Customer;
 use App\Entity\CustomerMerchantNotificationPreference;
 use App\Entity\LoyaltyCard;
@@ -402,6 +403,43 @@ class NotificationService
         );
     }
 
+    public function notifyContestWinner(ContestWinner $winner): bool
+    {
+        $customer = $winner->getCustomer();
+        $contest = $winner->getContest();
+        $reward = $winner->getReward();
+        $merchant = $contest?->getMerchant();
+
+        if (!$customer instanceof Customer || !$contest instanceof Contest || !$merchant instanceof Merchant || $reward === null) {
+            return false;
+        }
+
+        $rewardType = $reward->getType();
+        $isCardReward = in_array($rewardType, [
+            \App\Enum\ContestRewardType::CARD_STAMP,
+            \App\Enum\ContestRewardType::CARD_POINT,
+        ], true);
+
+        return $this->send(
+            $merchant,
+            $customer,
+            NotificationType::CONTEST_WINNER,
+            [
+                'dashboard_url' => $this->buildCustomerDashboardUrl(),
+                'contest_title' => $contest->getTitle(),
+                'contest_description' => $contest->getDescription(),
+                'contest_draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                'reward_title' => $reward->getTitle(),
+                'reward_rank' => $reward->getRank(),
+                'reward_type' => $rewardType->value,
+                'reward_description' => $reward->getRewardDescription(),
+                'reward_target_value' => $reward->getTargetValue(),
+                'qr_code_token' => $winner->getQrCodeToken(),
+                'is_card_reward' => $isCardReward,
+            ],
+        );
+    }
+
     public function send(Merchant $merchant, Customer $customer, NotificationType $type, array $context = []): bool
     {
         if (!$this->isMandatoryNotificationType($type)) {
@@ -497,6 +535,7 @@ class NotificationService
             NotificationType::CONTEST_ENDING_SOON => sprintf('Plus que 2 jours pour participer au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::CONTEST_DRAW_DAY => sprintf('Tirage aujourd\'hui chez %s : bonne chance !', $merchant->getCompanyName() ?? 'Coachat'),
             NotificationType::CONTEST_PARTICIPATION_UPDATED => sprintf('Votre participation au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat'),
+            NotificationType::CONTEST_WINNER => sprintf('🎉 Bravo, vous avez gagné au jeu concours chez %s !', $merchant->getCompanyName() ?? 'Coachat'),
             default => null,
         };
     }
@@ -526,6 +565,7 @@ class NotificationService
             NotificationType::CONTEST_ENDING_SOON,
             NotificationType::CONTEST_DRAW_DAY,
             NotificationType::CONTEST_PARTICIPATION_UPDATED,
+            NotificationType::CONTEST_WINNER,
         ], true)) {
             return $preference->isContestNotificationsEnabled();
         }

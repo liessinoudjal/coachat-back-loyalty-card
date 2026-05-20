@@ -144,6 +144,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             NotificationType::CONTEST_ENDING_SOON => $this->buildContestEndingSoonEmailData($merchant, $customer, $context),
             NotificationType::CONTEST_DRAW_DAY => $this->buildContestDrawDayEmailData($merchant, $customer, $context),
             NotificationType::CONTEST_PARTICIPATION_UPDATED => $this->buildContestParticipationUpdatedEmailData($merchant, $customer, $context),
+            NotificationType::CONTEST_WINNER => $this->buildContestWinnerEmailData($merchant, $customer, $context),
             default => throw new \InvalidArgumentException(sprintf('Unsupported email notification type "%s".', $type->value)),
         };
     }
@@ -1000,6 +1001,92 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         ];
     }
 
+    /**
+     * @param array{dashboard_url?: string, contest_title?: string, contest_description?: string, contest_draw_at?: string, reward_title?: string, reward_rank?: int, reward_type?: string, reward_description?: string, reward_target_value?: int|null, qr_code_token?: string, is_card_reward?: bool} $context
+     *
+     * @return array{subject: string, text: string, html: string}
+     */
+    private function buildContestWinnerEmailData(Merchant $merchant, Customer $customer, array $context): array
+    {
+        $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
+        $contestTitle = (string) ($context['contest_title'] ?? 'Jeu concours');
+        $contestDescription = (string) ($context['contest_description'] ?? '');
+        $drawAt = $this->formatFrenchDateTimeLabel((string) ($context['contest_draw_at'] ?? ''));
+        $rewardTitle = (string) ($context['reward_title'] ?? 'votre lot');
+        $rewardRank = (int) ($context['reward_rank'] ?? 0);
+        $rewardDescription = (string) ($context['reward_description'] ?? '');
+        $rewardTargetValue = isset($context['reward_target_value']) ? (int) $context['reward_target_value'] : null;
+        $qrCodeToken = (string) ($context['qr_code_token'] ?? '');
+        $isCardReward = (bool) ($context['is_card_reward'] ?? false);
+        $merchantName = $merchant->getCompanyName() ?? 'ce commerce';
+
+        $rewardInstructions = $isCardReward
+            ? 'Votre lot prend la forme d\'une carte de fidélité dédiée qui vient d\'être créée dans votre tableau de bord. Présentez-la en magasin pour la faire scanner et profiter de votre récompense.'
+            : 'Présentez en magasin le QR code disponible dans votre tableau de bord pour retirer votre lot.';
+
+        $subject = sprintf('🎉 Bravo, vous avez gagné au jeu concours chez %s !', $merchantName);
+        $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
+
+        $text = implode("\n", array_filter([
+            sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
+            '',
+            sprintf('Félicitations ! Vous êtes l\'un des gagnants du jeu concours "%s" organisé par %s.', $contestTitle, $merchantName),
+            $rewardRank > 0
+                ? sprintf('Votre lot (%s tirage) : %s', $this->ordinalLabel($rewardRank), $rewardTitle)
+                : sprintf('Votre lot : %s', $rewardTitle),
+            $rewardDescription !== '' ? sprintf('Détail du lot : %s', $rewardDescription) : null,
+            $rewardTargetValue !== null && $rewardTargetValue > 0 && $isCardReward
+                ? sprintf('Objectif de la carte : %d unités.', $rewardTargetValue)
+                : null,
+            '',
+            $rewardInstructions,
+            $qrCodeToken !== '' && !$isCardReward ? sprintf('Référence QR : %s', $qrCodeToken) : null,
+            $drawAt !== '' ? sprintf('Date du tirage : %s.', $drawAt) : null,
+            $dashboardUrl !== '' ? sprintf('Voir ma récompense : %s', $dashboardUrl) : null,
+            '',
+            'Encore bravo et merci pour votre participation !',
+        ], static fn ($line) => $line !== null));
+
+        $html = $this->twig->render('emails/contest_winner.html.twig', [
+            'email_title' => '🎉 Félicitations, vous avez gagné !',
+            'email_eyebrow' => 'Jeu concours',
+            'email_accent' => 'GAGNANT',
+            'summary' => sprintf('Vous remportez "%s" au jeu concours "%s" organisé par %s.', $rewardTitle, $contestTitle, $merchantName),
+            'primary_value' => $rewardTitle,
+            'primary_label' => 'Votre lot',
+            'secondary_value' => $contestTitle,
+            'secondary_label' => 'Concours',
+            'customer' => $customer,
+            'merchant' => $merchant,
+            'dashboard_url' => $dashboardUrl,
+            'contest_title' => $contestTitle,
+            'contest_description' => $contestDescription,
+            'contest_draw_at' => $drawAt,
+            'reward_title' => $rewardTitle,
+            'reward_rank' => $rewardRank,
+            'reward_rank_label' => $rewardRank > 0 ? $this->ordinalLabel($rewardRank) : '',
+            'reward_description' => $rewardDescription,
+            'reward_target_value' => $rewardTargetValue,
+            'qr_code_token' => $qrCodeToken,
+            'is_card_reward' => $isCardReward,
+            'reward_instructions' => $rewardInstructions,
+        ] + $googleReviewInviteContext);
+
+        return [
+            'subject' => $subject,
+            'text' => $text,
+            'html' => $html,
+        ];
+    }
+
+    private function ordinalLabel(int $rank): string
+    {
+        return match ($rank) {
+            1 => '1er',
+            default => sprintf('%dème', $rank),
+        };
+    }
+
     private function formatFrenchDateLabel(string $value): string
     {
         $raw = trim($value);
@@ -1017,7 +1104,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'fr_FR',
             \IntlDateFormatter::FULL,
             \IntlDateFormatter::NONE,
-            $date->getTimezone()->getName(),
+            $this->normalizeTimezoneForIntl($date->getTimezone()->getName()),
             \IntlDateFormatter::GREGORIAN,
             'EEEE d MMMM yyyy',
         );
@@ -1047,7 +1134,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'fr_FR',
             \IntlDateFormatter::FULL,
             \IntlDateFormatter::SHORT,
-            $date->getTimezone()->getName(),
+            $this->normalizeTimezoneForIntl($date->getTimezone()->getName()),
             \IntlDateFormatter::GREGORIAN,
             'EEEE d MMMM yyyy HH:mm',
         );
@@ -1058,6 +1145,19 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         }
 
         return $formatted;
+    }
+
+    /**
+     * IntlDateFormatter only accepts IANA timezone IDs or GMT-style offsets.
+     * Raw ISO offsets like "+00:00" or "+02:00" must be prefixed with "GMT".
+     */
+    private function normalizeTimezoneForIntl(string $tzName): string
+    {
+        if (preg_match('/^[+\-]\d{2}:\d{2}$/', $tzName) === 1) {
+            return 'GMT' . $tzName;
+        }
+
+        return $tzName;
     }
 
     /**

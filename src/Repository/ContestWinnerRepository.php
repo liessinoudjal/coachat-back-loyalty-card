@@ -40,7 +40,7 @@ class ContestWinnerRepository extends ServiceEntityRepository
             ->leftJoin('cw.reward', 'reward')
             ->leftJoin('cw.customer', 'customer')
             ->where('cw.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->orderBy('reward.rank', 'ASC')
             ->addOrderBy('cw.createdAt', 'ASC')
             ->getQuery()
@@ -55,7 +55,7 @@ class ContestWinnerRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('cw')
             ->where('cw.contest = :contest')
             ->andWhere('cw.isClaimed = false')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->orderBy('cw.reward.rank', 'ASC')
             ->getQuery()
             ->getResult();
@@ -69,7 +69,7 @@ class ContestWinnerRepository extends ServiceEntityRepository
         return (int) $this->createQueryBuilder('cw')
             ->select('COUNT(cw)')
             ->where('cw.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->getQuery()
             ->getSingleScalarResult();
     }
@@ -82,7 +82,7 @@ class ContestWinnerRepository extends ServiceEntityRepository
         $rows = $this->createQueryBuilder('cw')
             ->select('DISTINCT IDENTITY(cw.customer) AS customer_id')
             ->where('cw.contest = :contest')
-            ->setParameter('contest', $contest)
+            ->setParameter('contest', $contest->getId(), 'uuid')
             ->getQuery()
             ->getArrayResult();
 
