@@ -361,6 +361,8 @@ class MerchantContestController extends AbstractController
             }
         }
 
+        $isDraft = $contest->getStatus() === ContestStatus::DRAFT;
+
         $startAt = $contest->getStartAt();
         $endAt = $contest->getEndAt();
         if (!$startAt instanceof \DateTimeImmutable || !$endAt instanceof \DateTimeImmutable) {
@@ -370,10 +372,13 @@ class MerchantContestController extends AbstractController
             return new JsonResponse(['error' => 'contest_end_before_start'], 422);
         }
         // Start date must be in the future (matches the "from tomorrow" constraint enforced by the form).
-        $today = (new \DateTimeImmutable('today'))->setTime(0, 0, 0);
-        $startDay = $startAt->setTime(0, 0, 0);
-        if ($startDay <= $today) {
-            return new JsonResponse(['error' => 'contest_start_at_too_soon'], 422);
+        // Drafts can keep past start dates so partial work can be saved without losing edits.
+        if (!$isDraft) {
+            $today = (new \DateTimeImmutable('today'))->setTime(0, 0, 0);
+            $startDay = $startAt->setTime(0, 0, 0);
+            if ($startDay <= $today) {
+                return new JsonResponse(['error' => 'contest_start_at_too_soon'], 422);
+            }
         }
 
         $drawAt = $contest->getDrawAt();
@@ -382,7 +387,7 @@ class MerchantContestController extends AbstractController
         }
 
         if (array_key_exists('rewards', $payload)) {
-            if (!is_array($payload['rewards']) || count($payload['rewards']) === 0) {
+            if (!is_array($payload['rewards']) || (!$isDraft && count($payload['rewards']) === 0)) {
                 return new JsonResponse(['error' => 'contest_rewards_required'], 422);
             }
 
@@ -464,7 +469,7 @@ class MerchantContestController extends AbstractController
                 $contest->addReward($reward);
                 $rank++;
             }
-        } elseif (!$isUpdate || $contest->getRewards()->count() === 0) {
+        } elseif (!$isDraft && (!$isUpdate || $contest->getRewards()->count() === 0)) {
             return new JsonResponse(['error' => 'contest_rewards_required'], 422);
         }
 
