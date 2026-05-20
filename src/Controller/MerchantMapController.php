@@ -416,7 +416,7 @@ final class MerchantMapController extends AbstractController
             return [];
         }
         $index = [];
-        $statuses = [ContestStatus::DRAFT, ContestStatus::SCHEDULED, ContestStatus::ACTIVE];
+        $statuses = [ContestStatus::SCHEDULED, ContestStatus::ACTIVE];
 
         foreach ($merchants as $merchant) {
             if (!$merchant instanceof Merchant) {

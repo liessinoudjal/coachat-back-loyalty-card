@@ -6,6 +6,7 @@ use App\Entity\Contest;
 use App\Entity\ContestParticipation;
 use App\Entity\Customer;
 use App\Entity\Transaction;
+use App\Enum\ContestStatus;
 use App\Repository\ContestRepository;
 use App\Repository\ContestParticipationRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -44,8 +45,10 @@ class ContestParticipationService
             ->where('c.merchant = :merchant')
             ->andWhere('c.startAt <= :now')
             ->andWhere('c.endAt >= :now')
+            ->andWhere('c.status != :draft')
             ->setParameter('merchant', $merchant)
             ->setParameter('now', $now)
+            ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()
             ->getResult();
 

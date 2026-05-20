@@ -330,8 +330,28 @@ class MerchantContestController extends AbstractController
             $contest->setDrawAt($contest->getEndAt());
         }
 
-        if (!$isUpdate) {
-            $contest->setStatus(ContestStatus::SCHEDULED);
+        if (!$isUpdate || array_key_exists('status', $payload)) {
+            $requestedStatus = $payload['status'] ?? null;
+            if ($requestedStatus === null) {
+                if (!$isUpdate) {
+                    $contest->setStatus(ContestStatus::SCHEDULED);
+                }
+            } else {
+                $normalized = is_string($requestedStatus) ? strtolower(trim($requestedStatus)) : '';
+                $allowed = [
+                    'draft' => ContestStatus::DRAFT,
+                    'scheduled' => ContestStatus::SCHEDULED,
+                    'published' => ContestStatus::SCHEDULED,
+                ];
+                if (!array_key_exists($normalized, $allowed)) {
+                    return new JsonResponse(['error' => 'contest_status_invalid'], 422);
+                }
+                // On update, only allow toggling between DRAFT and SCHEDULED while the contest is still editable.
+                if ($isUpdate && !in_array($contest->getStatus(), [ContestStatus::DRAFT, ContestStatus::SCHEDULED], true)) {
+                    return new JsonResponse(['error' => 'contest_status_locked'], 409);
+                }
+                $contest->setStatus($allowed[$normalized]);
+            }
         }
 
         $startAt = $contest->getStartAt();
@@ -341,6 +361,12 @@ class MerchantContestController extends AbstractController
         }
         if ($endAt < $startAt) {
             return new JsonResponse(['error' => 'contest_end_before_start'], 422);
+        }
+        // Start date must be in the future (matches the "from tomorrow" constraint enforced by the form).
+        $today = (new \DateTimeImmutable('today'))->setTime(0, 0, 0);
+        $startDay = $startAt->setTime(0, 0, 0);
+        if ($startDay <= $today) {
+            return new JsonResponse(['error' => 'contest_start_at_too_soon'], 422);
         }
 
         $drawAt = $contest->getDrawAt();

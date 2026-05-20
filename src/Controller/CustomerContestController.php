@@ -58,7 +58,7 @@ final class CustomerContestController extends AbstractController
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('Europe/Paris'));
-        $statuses = [ContestStatus::DRAFT, ContestStatus::SCHEDULED, ContestStatus::ACTIVE];
+        $statuses = [ContestStatus::SCHEDULED, ContestStatus::ACTIVE];
 
         $contests = [];
         $activeCount = 0;

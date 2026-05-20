@@ -4,6 +4,7 @@ namespace App\Repository;
 
 use App\Entity\Contest;
 use App\Entity\Merchant;
+use App\Enum\ContestStatus;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
@@ -42,8 +43,10 @@ class ContestRepository extends ServiceEntityRepository
             ->andWhere('contest.startAt >= :fromInclusive')
             ->andWhere('contest.startAt < :toExclusive')
             ->andWhere('contest.startNotificationSentAt IS NULL')
+            ->andWhere('contest.status != :draft')
             ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
             ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
+            ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()
             ->getResult();
     }
@@ -57,8 +60,10 @@ class ContestRepository extends ServiceEntityRepository
             ->andWhere('contest.endAt >= :fromInclusive')
             ->andWhere('contest.endAt < :toExclusive')
             ->andWhere('contest.endingSoonNotificationSentAt IS NULL')
+            ->andWhere('contest.status != :draft')
             ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
             ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
+            ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()
             ->getResult();
     }
@@ -72,8 +77,10 @@ class ContestRepository extends ServiceEntityRepository
             ->andWhere('contest.startAt >= :fromInclusive')
             ->andWhere('contest.startAt < :toExclusive')
             ->andWhere('contest.dayBeforeNotificationSentAt IS NULL')
+            ->andWhere('contest.status != :draft')
             ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
             ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
+            ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()
             ->getResult();
     }
@@ -87,8 +94,10 @@ class ContestRepository extends ServiceEntityRepository
             ->andWhere('contest.drawAt >= :fromInclusive')
             ->andWhere('contest.drawAt < :toExclusive')
             ->andWhere('contest.drawDayNotificationSentAt IS NULL')
+            ->andWhere('contest.status != :draft')
             ->setParameter('fromInclusive', $fromInclusive, 'datetime_immutable')
             ->setParameter('toExclusive', $toExclusive, 'datetime_immutable')
+            ->setParameter('draft', ContestStatus::DRAFT->value)
             ->getQuery()
             ->getResult();
     }
