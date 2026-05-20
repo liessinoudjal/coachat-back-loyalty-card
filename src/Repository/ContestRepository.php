@@ -106,6 +106,9 @@ class ContestRepository extends ServiceEntityRepository
      * Visible contests for the public WMCP API: scheduled or active contests
      * that have not yet ended. Eagerly loads rewards.
      *
+     * merchant_id is stored as BINARY(16): pass raw binary values so Doctrine
+     * does not stringify UUIDs (RFC4122) for the IN clause comparison.
+     *
      * @param Merchant[] $merchants
      * @return Contest[]
      */
@@ -115,14 +118,23 @@ class ContestRepository extends ServiceEntityRepository
             return [];
         }
 
+        $binaryIds = array_values(array_filter(
+            array_map(static fn(Merchant $m) => $m->getId()?->toBinary(), $merchants),
+            static fn(?string $b) => $b !== null,
+        ));
+
+        if (empty($binaryIds)) {
+            return [];
+        }
+
         return $this->createQueryBuilder('contest')
             ->distinct()
             ->addSelect('reward')
             ->leftJoin('contest.rewards', 'reward')
-            ->andWhere('contest.merchant IN (:merchants)')
+            ->andWhere('IDENTITY(contest.merchant) IN (:merchantIds)')
             ->andWhere('contest.status IN (:statuses)')
             ->andWhere('contest.endAt >= :now')
-            ->setParameter('merchants', $merchants)
+            ->setParameter('merchantIds', $binaryIds)
             ->setParameter('statuses', [ContestStatus::SCHEDULED->value, ContestStatus::ACTIVE->value])
             ->setParameter('now', $now, 'datetime_immutable')
             ->orderBy('contest.startAt', 'ASC')

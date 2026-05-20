@@ -185,9 +185,10 @@ final class PublicMerchantMapController extends AbstractController
 
         $now = new \DateTimeImmutable('now');
         $today = new \DateTimeImmutable('today');
-        $contestsByMerchant = $claimedOnly
-            ? $this->indexVisibleContests(array_map(fn($row) => $row['merchant'], $rows), $now)
-            : [];
+        $contestsByMerchant = $this->indexVisibleContests(
+            array_map(fn($row) => $row['merchant'], $rows),
+            $now,
+        );
         $merchants = [];
 
         foreach ($rows as $row) {
@@ -327,8 +328,9 @@ final class PublicMerchantMapController extends AbstractController
         }
 
         $today = new \DateTimeImmutable('today');
+        $now = new \DateTimeImmutable('now');
 
-        $merchants = array_map(function (array $row) use ($merchantById, $today): array {
+        $merchants = array_map(function (array $row) use ($merchantById, $today, $now): array {
             $merchantEntity = $merchantById[$row['id']] ?? null;
             $isClaimed = $merchantEntity instanceof Merchant && $merchantEntity->getUser() !== null;
             $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
@@ -336,6 +338,9 @@ final class PublicMerchantMapController extends AbstractController
                 : false;
             $hasActiveOffers = $merchantEntity instanceof Merchant
                 ? ($isClaimed && count($this->collectActiveOffers($merchantEntity, $today)) > 0)
+                : false;
+            $hasActiveContests = $merchantEntity instanceof Merchant
+                ? ($isClaimed && count($this->serializeContestsForMerchant($merchantEntity, $now)) > 0)
                 : false;
 
             return [
@@ -349,6 +354,7 @@ final class PublicMerchantMapController extends AbstractController
                 'distance_km' => $row['distance_km'],
                 'has_loyalty_programs' => $hasLoyaltyPrograms,
                 'has_active_promotional_offers' => $hasActiveOffers,
+                'has_active_contests' => $hasActiveContests,
                 'is_claimed' => $isClaimed,
                 'subscribe_url' => sprintf('/?customer_signup=1&merchant_ref=%s&signup_type=landing_map', urlencode($row['id'])),
             ];
@@ -508,20 +514,28 @@ final class PublicMerchantMapController extends AbstractController
      */
     private function indexVisibleContests(array $merchants, \DateTimeImmutable $now): array
     {
+        error_log("indexVisibleContests() called with " . count($merchants) . " merchants");
         $merchants = array_values(array_filter($merchants, fn($m) => $m instanceof Merchant && $m->getUser() !== null));
+        error_log("After filter: " . count($merchants) . " claimed merchants");
+        
         if (empty($merchants)) {
             return [];
         }
 
         $contests = $this->contestRepository->findVisibleForMerchants($merchants, $now);
+        error_log("Found " . count($contests) . " visible contests");
+        
         $index = [];
         foreach ($contests as $contest) {
             $mid = $contest->getMerchant()?->getId()?->toRfc4122();
             if ($mid === null) {
                 continue;
             }
+            error_log("Adding contest for merchant: " . $mid);
             $index[$mid][] = $this->serializeContest($contest);
         }
+        
+        error_log("Contest index keys: " . json_encode(array_keys($index)));
 
         return $index;
     }

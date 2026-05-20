@@ -458,10 +458,28 @@ class NotificationService
         $log = $this->createPendingLog($merchant, $recipientEmail, $type, $this->buildSubject($type, $merchant));
 
         try {
-            match ($channel) {
-                NotificationChannel::EMAIL => $this->emailStrategy->send($merchant, $customer, $type, $context),
-                NotificationChannel::PUSH => $this->pushStrategy->send($merchant, $customer, $type, $context),
-            };
+            try {
+                match ($channel) {
+                    NotificationChannel::EMAIL => $this->emailStrategy->send($merchant, $customer, $type, $context),
+                    NotificationChannel::PUSH => $this->pushStrategy->send($merchant, $customer, $type, $context),
+                };
+            } catch (\Throwable $pushException) {
+                // Push is not yet implemented (or transiently failing): fall back to email
+                // so critical notifications (winner, card completed, ...) still reach the customer.
+                if ($channel !== NotificationChannel::PUSH) {
+                    throw $pushException;
+                }
+
+                $this->logger->warning('Push notification failed, falling back to email.', [
+                    'merchant_id' => $merchant->getId()?->toRfc4122(),
+                    'customer_id' => $customer->getId(),
+                    'type' => $type->value,
+                    'exception' => $pushException->getMessage(),
+                ]);
+
+                $this->emailStrategy->send($merchant, $customer, $type, $context);
+                $channel = NotificationChannel::EMAIL;
+            }
 
             $log
                 ->setStatus(NotificationLogStatus::SENT)
