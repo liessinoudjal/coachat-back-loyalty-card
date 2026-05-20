@@ -68,6 +68,16 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
         return null;
     }
 
+    public function findOneByNormalizedEmail(string $email): ?User
+    {
+        return $this->createQueryBuilder('u')
+            ->andWhere('LOWER(u.email) = :email')
+            ->setParameter('email', mb_strtolower(trim($email)))
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     public function findOneSuperAdminByGoogleLogin(string $googleId, string $email): ?User
     {
         $users = $this->createQueryBuilder('u')

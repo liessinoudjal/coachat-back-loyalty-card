@@ -80,15 +80,20 @@ class NotificationService
         );
     }
 
-    public function notifyCustomerSignup(Customer $customer, Merchant $merchant): void
+    public function notifyCustomerSignup(Customer $customer, Merchant $merchant, ?string $verifyUrl = null): void
     {
+        $context = [
+            'dashboard_url' => $this->buildCustomerDashboardUrl(),
+        ];
+        if ($verifyUrl !== null && $verifyUrl !== '') {
+            $context['verify_url'] = $verifyUrl;
+        }
+
         $this->send(
             $merchant,
             $customer,
             NotificationType::CUSTOMER_SIGNUP,
-            [
-                'dashboard_url' => $this->buildCustomerDashboardUrl(),
-            ],
+            $context,
         );
     }
 

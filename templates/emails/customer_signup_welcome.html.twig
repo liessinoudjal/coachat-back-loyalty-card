@@ -3,15 +3,43 @@
 {% block email_body %}
     <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ customer.name ?? 'client' }},</div>
 
+    {% if needs_verification|default(false) and verify_url|default('') != '' %}
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#fffbeb; border:1px solid #fde68a; border-radius:16px; margin-bottom:16px;">
+            <tr>
+                <td style="padding:18px 20px;">
+                    <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#92400e; margin-bottom:8px;">Activation requise</div>
+                    <div style="font-size:16px; line-height:1.6; color:#78350f; margin-bottom:14px;">
+                        Avant d'accéder à votre espace, veuillez confirmer votre adresse email.
+                        Ce lien est valable <strong>24 heures</strong>.
+                    </div>
+                    <a href="{{ verify_url }}"
+                       style="display:inline-block; background-color:#111827; color:#ffffff !important;
+                              text-decoration:none; padding:14px 22px; border-radius:10px;
+                              font-size:15px; font-weight:700;">
+                        Confirmer mon adresse email
+                    </a>
+                    <div style="font-size:12px; line-height:1.5; color:#92400e; margin-top:12px; word-break:break-all;">
+                        Si le bouton ne fonctionne pas, copiez-collez ce lien dans votre navigateur :<br>
+                        <a href="{{ verify_url }}" style="color:#92400e;">{{ verify_url }}</a>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    {% endif %}
+
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
         <tr>
             <td style="padding:8px 20px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                     <tr>
                         <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
-                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Compte actif</div>
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">{{ needs_verification|default(false) ? 'Compte créé' : 'Compte actif' }}</div>
                             <div style="font-size:16px; line-height:1.5; font-weight:600; color:#111827; word-break:break-word;">
-                                Votre inscription est confirmée et votre espace client est prêt.
+                                {% if needs_verification|default(false) %}
+                                    Votre inscription est enregistrée. Confirmez votre email pour activer votre espace client.
+                                {% else %}
+                                    Votre inscription est confirmée et votre espace client est prêt.
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
@@ -36,13 +64,15 @@
         </tr>
     </table>
 
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
-        <tr>
-            <td>
-                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Accéder à mon dashboard</a>
-            </td>
-        </tr>
-    </table>
+    {% if not (needs_verification|default(false)) %}
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+            <tr>
+                <td>
+                    <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Accéder à mon dashboard</a>
+                </td>
+            </tr>
+        </table>
+    {% endif %}
 
     <div style="font-size:14px; line-height:1.7; color:#6b7280;">
         Merci de rejoindre {{ merchant.companyName ?? merchant.company_name ?? 'Coachat' }}.

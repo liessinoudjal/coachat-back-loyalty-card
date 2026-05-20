@@ -57,6 +57,8 @@ class CustomerController extends AbstractController
         return new JsonResponse([
             'error' => 'manual_customer_creation_disabled',
             'message' => 'Customer signup is available only via Google auth with merchant_ref QR flow.',
+            'next_action' => 'use_google_customer_auth',
+            'help' => 'If the customer already has a Google account on La Carte, ask them to log in with Google then open the merchant QR/link to join the new merchant.',
         ], 403);
     }
 

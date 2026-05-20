@@ -309,6 +309,100 @@ Ce flow est dédié à la connexion d'un customer déjà existant, sans `merchan
 - `403` : `customer_not_found`
 - `400` : `Authentication failed: ...`
 
+#### 2.e Form-based signup & login (mot de passe)
+
+Endpoints d'inscription et de connexion par formulaire (email + mot de passe). Le login form est **unifié** depuis mai 2026 : il accepte tous les rôles (merchant, customer, super-admin) sur le **même endpoint**. L'ancien `POST /api/auth/customer/login-form` est supprimé.
+
+##### Inscription merchant
+```
+POST /api/auth/merchant/register-form
+```
+
+**Body :**
+```json
+{
+  "name": "Acme SARL",
+  "email": "contact@acme.fr",
+  "password": "********"
+}
+```
+
+**Réponse** : même format que le login merchant (token JWT + user). Le compte est créé avec `email_verified=false` et un email de vérification dédié est envoyé.
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `email_invalid`, `password_too_short`
+- `409` : `account_already_exists`, `account_already_customer`, `account_exists_with_google`
+
+##### Inscription customer
+```
+POST /api/auth/customer/register-form
+```
+
+**Body :**
+```json
+{
+  "name": "Léa Côté",
+  "email": "lea@example.com",
+  "password": "********",
+  "merchant_ref": "<merchant_uuid>",
+  "accepted_terms": true,
+  "accepted_terms_version": "v1",
+  "accepted_terms_accepted_at": "2026-05-19T12:00:00+00:00"
+}
+```
+
+**Réponse** : même format que le callback customer Google (token + user + customer). Le compte est créé avec `email_verified=false`. **Un seul email** est envoyé : le mail de bienvenue qui embarque un lien de confirmation d'adresse (CTA "Confirmer mon adresse email").
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `email_invalid`, `password_too_short`, `accepted_terms_required`, `merchant_ref_invalid`, `merchant_ref_inactive`
+- `409` : `account_already_exists`, `account_already_merchant`, `account_already_customer`, `account_exists_with_google`, `customer_limit_reached`
+
+##### Login unifié (merchant + customer + super-admin)
+```
+POST /api/auth/merchant/login-form
+```
+
+Endpoint **central** pour tous les logins par mot de passe. Le routage rôle se fait côté serveur en fonction du profil lié au user. L'ancien `POST /api/auth/customer/login-form` a été **supprimé** ; les anciens clients qui scannent un QR avec un compte existant peuvent passer ici en transmettant un `merchant_ref` optionnel.
+
+**Body :**
+```json
+{
+  "email": "user@example.com",
+  "password": "********",
+  "merchant_ref": "<merchant_uuid>"
+}
+```
+
+- `merchant_ref` est **optionnel**. S'il est fourni et que le user est résolu comme un customer, le customer est lié au merchant (équivalent à un signup par QR pour un compte existant).
+- `merchant_ref` est **ignoré** si le user est un merchant ou un super-admin.
+
+**Comportement :**
+1. Si le user est super-admin ou merchant linked → réponse merchant standard (`buildAuthSuccessResponse`).
+2. Sinon, si le user a un `Customer` accessible → ajoute `ROLE_CUSTOMER`, applique le linking `merchant_ref` si fourni, renvoie la réponse customer (`buildCustomerAuthSuccessResponse`) avec un payload `customer.{id,email,name,merchant_ref}`.
+3. Sinon → `403 account_not_linked`.
+
+**Réponse merchant :**
+```json
+{
+  "token": "jwt_token_here",
+  "refresh_token": "refresh_token_here",
+  "user": { "id": 1, "email": "...", "name": "...", "email_verified": true },
+  "merchant_context": { "id": "...", "company_name": "..." }
+}
+```
+
+**Réponse customer :** identique au callback Google customer (cf. §2.c), avec un objet `customer` au lieu de `merchant_context`.
+
+**Erreurs stables :**
+- `422` : `missing_required_fields`, `merchant_ref_invalid`, `merchant_ref_inactive`
+- `401` : `invalid_credentials`
+- `403` : `account_not_linked` (nouvelle erreur ; remplace l'ancien `account_already_customer` côté merchant login et `customer_not_found` côté customer login)
+- `409` : `use_google_login`, `customer_limit_reached` (si linking `merchant_ref` dépasse le plafond du merchant)
+
+**Notes de migration :**
+- Tous les anciens consommateurs de `POST /api/auth/customer/login-form` doivent passer à `POST /api/auth/merchant/login-form` en transmettant `merchant_ref` si nécessaire.
+- Les QR codes en production encodent toujours `/?customer_signup=1&merchant_ref=<id>` et redirigent vers `/customer/signup` côté frontend ; aucune régression QR.
+
 #### 3. Get User Profile
 ```
 GET /api/profile

@@ -39,6 +39,21 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\OneToMany(targetEntity: RefreshToken::class, mappedBy: 'user', orphanRemoval: true)]
     private Collection $refreshTokens;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $emailVerified = false;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $emailVerificationToken = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $emailVerificationTokenSentAt = null;
+
+    #[ORM\Column(length: 180, nullable: true)]
+    private ?string $emailVerificationSentTo = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $emailVerifiedAt = null;
+
     public function __construct()
     {
         $this->refreshTokens = new ArrayCollection();
@@ -236,5 +251,65 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function eraseCredentials(): void
     {
         // @deprecated, to be removed when upgrading to Symfony 8
+    }
+
+    public function isEmailVerified(): bool
+    {
+        return $this->emailVerified;
+    }
+
+    public function setEmailVerified(bool $emailVerified): static
+    {
+        $this->emailVerified = $emailVerified;
+
+        return $this;
+    }
+
+    public function getEmailVerificationToken(): ?string
+    {
+        return $this->emailVerificationToken;
+    }
+
+    public function setEmailVerificationToken(?string $token): static
+    {
+        $this->emailVerificationToken = $token;
+
+        return $this;
+    }
+
+    public function getEmailVerificationTokenSentAt(): ?\DateTimeImmutable
+    {
+        return $this->emailVerificationTokenSentAt;
+    }
+
+    public function setEmailVerificationTokenSentAt(?\DateTimeImmutable $sentAt): static
+    {
+        $this->emailVerificationTokenSentAt = $sentAt;
+
+        return $this;
+    }
+
+    public function getEmailVerificationSentTo(): ?string
+    {
+        return $this->emailVerificationSentTo;
+    }
+
+    public function setEmailVerificationSentTo(?string $email): static
+    {
+        $this->emailVerificationSentTo = $email;
+
+        return $this;
+    }
+
+    public function getEmailVerifiedAt(): ?\DateTimeImmutable
+    {
+        return $this->emailVerifiedAt;
+    }
+
+    public function setEmailVerifiedAt(?\DateTimeImmutable $verifiedAt): static
+    {
+        $this->emailVerifiedAt = $verifiedAt;
+
+        return $this;
     }
 }
