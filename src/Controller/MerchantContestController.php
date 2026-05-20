@@ -7,6 +7,7 @@ use App\Entity\ContestParticipation;
 use App\Entity\ContestReward;
 use App\Entity\ContestWinner;
 use App\Entity\Merchant;
+use App\Enum\ContestRewardType;
 use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
 use App\Repository\ContestRepository;
@@ -192,6 +193,9 @@ class MerchantContestController extends AbstractController
             $newReward->setTitle($reward->getTitle());
             $newReward->setImageUrl($reward->getImageUrl());
             $newReward->setRank($reward->getRank());
+            $newReward->setType($reward->getType());
+            $newReward->setTargetValue($reward->getTargetValue());
+            $newReward->setRewardDescription($reward->getRewardDescription());
             $clone->addReward($newReward);
         }
 
@@ -237,6 +241,9 @@ class MerchantContestController extends AbstractController
                     'title' => $reward->getTitle(),
                     'image_url' => $reward->getImageUrl(),
                     'rank' => $reward->getRank(),
+                    'type' => $reward->getType()->value,
+                    'target_value' => $reward->getTargetValue(),
+                    'reward_description' => $reward->getRewardDescription(),
                 ],
                 $this->drawService->getRemainingRewards($contest),
             ),
@@ -390,9 +397,44 @@ class MerchantContestController extends AbstractController
                     return new JsonResponse(['error' => 'contest_reward_title_required'], 422);
                 }
 
+                $rewardType = ContestRewardType::TEXT;
+                if (array_key_exists('type', $rewardPayload) && $rewardPayload['type'] !== null && $rewardPayload['type'] !== '') {
+                    $rewardType = ContestRewardType::tryFrom(strtoupper(trim((string) $rewardPayload['type'])));
+                    if ($rewardType === null) {
+                        return new JsonResponse(['error' => 'contest_reward_type_invalid'], 422);
+                    }
+                }
+
+                $targetValue = null;
+                $rewardDescription = null;
+                if ($rewardType !== ContestRewardType::TEXT) {
+                    $rawTarget = $rewardPayload['target_value'] ?? null;
+                    if ($rawTarget === null || $rawTarget === '') {
+                        return new JsonResponse(['error' => 'contest_reward_target_required'], 422);
+                    }
+                    if (!is_numeric($rawTarget)) {
+                        return new JsonResponse(['error' => 'contest_reward_target_invalid'], 422);
+                    }
+                    $targetValue = (int) $rawTarget;
+                    if ($targetValue <= 0) {
+                        return new JsonResponse(['error' => 'contest_reward_target_invalid'], 422);
+                    }
+
+                    $rawDescription = $rewardPayload['reward_description'] ?? null;
+                    if ($rawDescription !== null) {
+                        $rewardDescription = trim((string) $rawDescription);
+                        if ($rewardDescription === '') {
+                            $rewardDescription = null;
+                        }
+                    }
+                }
+
                 $validatedRewards[] = [
                     'title' => $label,
                     'image_url' => isset($rewardPayload['image_url']) ? trim((string) $rewardPayload['image_url']) : null,
+                    'type' => $rewardType,
+                    'target_value' => $targetValue,
+                    'reward_description' => $rewardDescription,
                 ];
             }
 
@@ -416,6 +458,9 @@ class MerchantContestController extends AbstractController
                 $reward->setTitle($label);
                 $reward->setImageUrl($validatedReward['image_url']);
                 $reward->setRank($rank);
+                $reward->setType($validatedReward['type']);
+                $reward->setTargetValue($validatedReward['target_value']);
+                $reward->setRewardDescription($validatedReward['reward_description']);
                 $contest->addReward($reward);
                 $rank++;
             }
@@ -514,6 +559,9 @@ class MerchantContestController extends AbstractController
                     'title' => $reward->getTitle(),
                     'image_url' => $reward->getImageUrl(),
                     'rank' => $reward->getRank(),
+                    'type' => $reward->getType()->value,
+                    'target_value' => $reward->getTargetValue(),
+                    'reward_description' => $reward->getRewardDescription(),
                 ],
                 $contest->getRewards()->toArray(),
             ),

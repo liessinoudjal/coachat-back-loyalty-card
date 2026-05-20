@@ -107,6 +107,9 @@ final class CustomerContestController extends AbstractController
                         'id' => $reward->getId(),
                         'title' => $reward->getTitle(),
                         'rank' => $reward->getRank(),
+                        'type' => $reward->getType()->value,
+                        'target_value' => $reward->getTargetValue(),
+                        'reward_description' => $reward->getRewardDescription(),
                     ];
                 }
 
