@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
+use App\Entity\Contest;
 use App\Entity\LoyaltyCard;
 use App\Entity\LoyaltyProgram;
 use App\Entity\Merchant;
@@ -215,11 +216,14 @@ class SuperAdminController extends AbstractController
         }
 
         $programs = $this->loyaltyProgramRepository->findBy(['merchant' => $merchant], ['name' => 'ASC']);
+        $activePrograms = array_values(array_filter($programs, fn (LoyaltyProgram $program): bool => $program->isActive()));
 
         return new JsonResponse([
             'merchant' => $this->formatMerchantPresenter($merchant),
             'items' => array_map(fn (LoyaltyProgram $program): array => $this->formatLoyaltyProgram($program), $programs),
+            'active_items' => array_map(fn (LoyaltyProgram $program): array => $this->formatLoyaltyProgram($program), $activePrograms),
             'total' => count($programs),
+            'active_total' => count($activePrograms),
         ]);
     }
 
@@ -413,6 +417,141 @@ class SuperAdminController extends AbstractController
                 'active_customers_last_30d' => count($activeCustomerIds),
                 'asset_downloads_print_total' => array_sum($printByMonth),
                 'asset_downloads_download_total' => array_sum($downloadByMonth),
+            ],
+        ]);
+    }
+
+    #[Route('/api/super-admin/dashboard-kpis', name: 'super_admin_dashboard_kpis', methods: ['GET'])]
+    public function dashboardKpis(): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_SUPER_ADMIN');
+
+        $now = new \DateTimeImmutable('first day of this month 00:00:00');
+        $months = [];
+        for ($i = 11; $i >= 0; $i--) {
+            $months[] = $now->modify("-{$i} months")->format('Y-m');
+        }
+        $from = \DateTimeImmutable::createFromFormat('Y-m-d', $months[0] . '-01')->setTime(0, 0, 0);
+
+        $bucketRows = static function (array $rows, string $dateKey, array $months): array {
+            $buckets = array_fill_keys($months, 0);
+
+            foreach ($rows as $row) {
+                $date = $row[$dateKey] ?? null;
+                if (!$date instanceof \DateTimeInterface) {
+                    continue;
+                }
+
+                $key = $date->format('Y-m');
+                if (isset($buckets[$key])) {
+                    $buckets[$key]++;
+                }
+            }
+
+            return array_values($buckets);
+        };
+
+        $labels = array_map(static function (string $ym): string {
+            [$year, $month] = explode('-', $ym);
+            $monthsFr = ['Jan', 'Fev', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aou', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            return $monthsFr[(int) $month - 1] . ' ' . $year;
+        }, $months);
+
+        $merchantRegistrations = $this->em->createQueryBuilder()
+            ->select('m.id', 'm.acceptedTermsAcceptedAt')
+            ->from(Merchant::class, 'm')
+            ->where('m.acceptedTermsAcceptedAt IS NOT NULL')
+            ->andWhere('m.acceptedTermsAcceptedAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $merchantSubscriptions = $this->em->createQueryBuilder()
+            ->select('m.id', 'm.currentPeriodStartAt')
+            ->from(Merchant::class, 'm')
+            ->where('m.currentPeriodStartAt IS NOT NULL')
+            ->andWhere('m.currentPeriodStartAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $scans = $this->em->createQueryBuilder()
+            ->select('t.id', 't.createdAt')
+            ->from(Transaction::class, 't')
+            ->where('t.createdAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $promotionalOffers = $this->em->createQueryBuilder()
+            ->select('p.id', 'p.createdAt')
+            ->from(PromotionalOffer::class, 'p')
+            ->where('p.createdAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $contests = $this->em->createQueryBuilder()
+            ->select('c.id', 'c.createdAt')
+            ->from(Contest::class, 'c')
+            ->where('c.createdAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $loyaltyCards = $this->em->createQueryBuilder()
+            ->select('lc.id', 'lc.createdAt')
+            ->from(LoyaltyCard::class, 'lc')
+            ->where('lc.createdAt >= :from')
+            ->setParameter('from', $from)
+            ->getQuery()
+            ->getArrayResult();
+
+        $merchantRegistrationsSeries = $bucketRows($merchantRegistrations, 'acceptedTermsAcceptedAt', $months);
+        $merchantSubscriptionsSeries = $bucketRows($merchantSubscriptions, 'currentPeriodStartAt', $months);
+        $scansSeries = $bucketRows($scans, 'createdAt', $months);
+        $promotionalOffersSeries = $bucketRows($promotionalOffers, 'createdAt', $months);
+        $contestsSeries = $bucketRows($contests, 'createdAt', $months);
+        $loyaltyCardsSeries = $bucketRows($loyaltyCards, 'createdAt', $months);
+
+        $activeSubscriptionsCurrent = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(m.id)')
+            ->from(Merchant::class, 'm')
+            ->where('m.subscriptionStatus IN (:statuses)')
+            ->setParameter('statuses', ['active', 'canceling'])
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $merchantsTotal = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(m.id)')
+            ->from(Merchant::class, 'm')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return new JsonResponse([
+            'period_labels' => $labels,
+            'merchant' => [
+                'registrations' => $merchantRegistrationsSeries,
+                'subscriptions_started' => $merchantSubscriptionsSeries,
+                'promotional_offers_created' => $promotionalOffersSeries,
+                'contests_created' => $contestsSeries,
+                'totals' => [
+                    'merchants_total' => $merchantsTotal,
+                    'registrations_last_12_months' => array_sum($merchantRegistrationsSeries),
+                    'subscriptions_started_last_12_months' => array_sum($merchantSubscriptionsSeries),
+                    'promotional_offers_created_last_12_months' => array_sum($promotionalOffersSeries),
+                    'contests_created_last_12_months' => array_sum($contestsSeries),
+                    'active_subscriptions_current' => $activeSubscriptionsCurrent,
+                ],
+            ],
+            'customer' => [
+                'scans' => $scansSeries,
+                'loyalty_cards_distributed' => $loyaltyCardsSeries,
+                'totals' => [
+                    'scans_last_12_months' => array_sum($scansSeries),
+                    'loyalty_cards_distributed_last_12_months' => array_sum($loyaltyCardsSeries),
+                ],
             ],
         ]);
     }
