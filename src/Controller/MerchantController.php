@@ -2,8 +2,11 @@
 
 namespace App\Controller;
 
+use App\Entity\Customer;
+use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\MerchantAssetDownloadEvent;
+use App\Entity\Transaction;
 use App\Repository\CustomerRepository;
 use App\Repository\PlanRepository;
 use App\Service\LegalTermsVersionProvider;
@@ -14,6 +17,8 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Uid\Uuid;
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
 
 class MerchantController extends AbstractController
 {
@@ -24,14 +29,402 @@ class MerchantController extends AbstractController
     private CustomerRepository $customerRepository;
     private LegalTermsVersionProvider $legalTermsVersionProvider;
     private SignupAlertMailer $signupAlertMailer;
+    private CacheInterface $cache;
 
-    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, CustomerRepository $customerRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer)
+    public function __construct(EntityManagerInterface $entityManager, PlanRepository $planRepository, CustomerRepository $customerRepository, LegalTermsVersionProvider $legalTermsVersionProvider, SignupAlertMailer $signupAlertMailer, CacheInterface $cache)
     {
         $this->entityManager = $entityManager;
         $this->planRepository = $planRepository;
         $this->customerRepository = $customerRepository;
         $this->legalTermsVersionProvider = $legalTermsVersionProvider;
         $this->signupAlertMailer = $signupAlertMailer;
+        $this->cache = $cache;
+    }
+
+    #[Route('/api/merchants/me/dashboard-kpis', name: 'merchant_dashboard_kpis', methods: ['GET'])]
+    public function dashboardKpis(): JsonResponse
+    {
+        $this->denyAccessUnlessGranted('ROLE_MERCHANT');
+
+        $merchant = $this->resolveActorMerchant();
+        if (!$merchant instanceof Merchant) {
+            return new JsonResponse(['error' => 'Merchant not found'], 404);
+        }
+
+        $now = new \DateTimeImmutable('first day of this month 00:00:00');
+        $monthKeys = $this->buildMonthKeys($now, 12);
+        $historyMonthKeys = array_slice($monthKeys, 0, 11);
+
+        $historyStart = \DateTimeImmutable::createFromFormat('Y-m-d', $historyMonthKeys[0] . '-01')
+            ->setTime(0, 0, 0);
+        $currentMonthStart = \DateTimeImmutable::createFromFormat('Y-m-d', $monthKeys[11] . '-01')
+            ->setTime(0, 0, 0);
+        $nextMonthStart = $currentMonthStart->modify('+1 month');
+
+        $merchantId = $merchant->getId()?->toRfc4122();
+        $historyCacheKey = sprintf(
+            'merchant_dashboard_kpis_history_v2_%s_%s_to_%s',
+            $merchantId ?? 'unknown',
+            $historyMonthKeys[0],
+            $historyMonthKeys[10],
+        );
+
+        $historical = $this->cache->get($historyCacheKey, function (ItemInterface $item) use ($merchant, $historyStart, $currentMonthStart): array {
+            // Historical months are immutable in business terms, so a long TTL is acceptable.
+            $item->expiresAfter(86400 * 30);
+
+            return [
+                'customers_new' => $this->fetchMonthlyDistinctCustomers($merchant, $historyStart, $currentMonthStart),
+                'loyalty_cards_new' => $this->fetchMonthlyCards($merchant, $historyStart, $currentMonthStart),
+                'transactions_scanned' => $this->fetchMonthlyTransactions($merchant, $historyStart, $currentMonthStart),
+            ];
+        });
+
+        $currentMonth = [
+            'customers_new' => $this->countDistinctCustomersForPeriod($merchant, $currentMonthStart, $nextMonthStart),
+            'loyalty_cards_new' => $this->countCardsForPeriod($merchant, $currentMonthStart, $nextMonthStart),
+            'transactions_scanned' => $this->countTransactionsForPeriod($merchant, $currentMonthStart, $nextMonthStart),
+        ];
+
+        $customersByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $customersByMonth[$ym] = (int) ($historical['customers_new'][$ym] ?? 0);
+        }
+        $customersByMonth[$monthKeys[11]] = $currentMonth['customers_new'];
+
+        $cardsByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $cardsByMonth[$ym] = (int) ($historical['loyalty_cards_new'][$ym] ?? 0);
+        }
+        $cardsByMonth[$monthKeys[11]] = $currentMonth['loyalty_cards_new'];
+
+        $transactionsByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $transactionsByMonth[$ym] = (int) ($historical['transactions_scanned'][$ym] ?? 0);
+        }
+        $transactionsByMonth[$monthKeys[11]] = $currentMonth['transactions_scanned'];
+
+        $rolling30Start = (new \DateTimeImmutable())->modify('-30 days');
+        $rolling30End = new \DateTimeImmutable();
+
+        $totalCards = $this->countCardsTotal($merchant);
+        $completedCards = $this->countCompletedCardsTotal($merchant);
+        $completionRate = $totalCards > 0 ? round(($completedCards / $totalCards) * 100, 1) : 0.0;
+
+        $totalCustomers = $this->countDistinctCustomersTotal($merchant);
+        $activeCustomers30d = $this->countDistinctActiveCustomersForPeriod($merchant, $rolling30Start, $rolling30End);
+        $inactiveCustomers30d = max($totalCustomers - $activeCustomers30d, 0);
+        $activeRate30dPct = $totalCustomers > 0 ? round(($activeCustomers30d / $totalCustomers) * 100, 1) : 0.0;
+        $transactionsScanned30d = $this->countTransactionsForPeriod($merchant, $rolling30Start, $rolling30End);
+        $avgScansPerActiveCustomer30d = $activeCustomers30d > 0
+            ? round($transactionsScanned30d / $activeCustomers30d, 2)
+            : 0.0;
+
+        $previousMonthScans = (int) ($transactionsByMonth[$monthKeys[10]] ?? 0);
+        $currentMonthScans = (int) ($transactionsByMonth[$monthKeys[11]] ?? 0);
+        $scansMoMChangePct = $previousMonthScans > 0
+            ? round((($currentMonthScans - $previousMonthScans) / $previousMonthScans) * 100, 1)
+            : null;
+
+        return new JsonResponse([
+            'period_keys' => $monthKeys,
+            'period_labels' => array_map(static fn (string $ym): string => self::formatMonthLabel($ym), $monthKeys),
+            'customers_new' => array_values($customersByMonth),
+            'loyalty_cards_new' => array_values($cardsByMonth),
+            'transactions_scanned' => array_values($transactionsByMonth),
+            'health_kpis' => [
+                'completion_rate_pct' => $completionRate,
+                'total_customers' => $totalCustomers,
+                'active_customers_30d' => $activeCustomers30d,
+                'active_rate_30d_pct' => $activeRate30dPct,
+                'inactive_customers_30d' => $inactiveCustomers30d,
+                'transactions_scanned_30d' => $transactionsScanned30d,
+                'avg_scans_per_active_customer_30d' => $avgScansPerActiveCustomer30d,
+                'scans_month_over_month_change_pct' => $scansMoMChangePct,
+            ],
+            'cache' => [
+                'historical_months_cached' => true,
+                'current_month_is_fresh' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildMonthKeys(\DateTimeImmutable $monthStart, int $count): array
+    {
+        $keys = [];
+        for ($i = $count - 1; $i >= 0; $i--) {
+            $keys[] = $monthStart->modify("-{$i} months")->format('Y-m');
+        }
+
+        return $keys;
+    }
+
+    private static function formatMonthLabel(string $yearMonth): string
+    {
+        [$y, $m] = explode('-', $yearMonth);
+        $monthsFr = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+        return $monthsFr[(int) $m - 1] . ' ' . $y;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function fetchMonthlyDistinctCustomers(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return [];
+        }
+
+        $rows = $this->entityManager->createQueryBuilder()
+            ->select('SUBSTRING(c.createdAt, 1, 7) AS ym', 'COUNT(DISTINCT c.id) AS total')
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.merchant', 'directMerchant')
+            ->leftJoin('c.merchants', 'linkedMerchant')
+            ->leftJoin('c.loyaltyCards', 'lc')
+            ->leftJoin('lc.merchant', 'cardMerchant')
+            ->where('directMerchant.id = :merchantId OR linkedMerchant.id = :merchantId OR cardMerchant.id = :merchantId')
+            ->andWhere('c.createdAt >= :from')
+            ->andWhere('c.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->groupBy('ym')
+            ->getQuery()
+            ->getArrayResult();
+
+        return $this->rowsToMonthMap($rows);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function fetchMonthlyCards(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return [];
+        }
+
+        $rows = $this->entityManager->createQueryBuilder()
+            ->select('SUBSTRING(lc.createdAt, 1, 7) AS ym', 'COUNT(lc.id) AS total')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('lc.createdAt >= :from')
+            ->andWhere('lc.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->groupBy('ym')
+            ->getQuery()
+            ->getArrayResult();
+
+        return $this->rowsToMonthMap($rows);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function fetchMonthlyTransactions(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return [];
+        }
+
+        $rows = $this->entityManager->createQueryBuilder()
+            ->select('SUBSTRING(t.createdAt, 1, 7) AS ym', 'COUNT(t.id) AS total')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('t.createdAt >= :from')
+            ->andWhere('t.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->groupBy('ym')
+            ->getQuery()
+            ->getArrayResult();
+
+        return $this->rowsToMonthMap($rows);
+    }
+
+    /**
+     * @param array<int, array{ym?:mixed,y?:mixed,m?:mixed,total:mixed}> $rows
+     *
+     * @return array<string, int>
+     */
+    private function rowsToMonthMap(array $rows): array
+    {
+        $map = [];
+        foreach ($rows as $row) {
+            $ym = (string) ($row['ym'] ?? '');
+            if (preg_match('/^\d{4}-\d{2}$/', $ym) === 1) {
+                $map[$ym] = (int) ($row['total'] ?? 0);
+
+                continue;
+            }
+
+            $year = (int) ($row['y'] ?? 0);
+            $month = (int) ($row['m'] ?? 0);
+            if ($year <= 0 || $month <= 0) {
+                continue;
+            }
+
+            $map[sprintf('%04d-%02d', $year, $month)] = (int) ($row['total'] ?? 0);
+        }
+
+        return $map;
+    }
+
+    private function countDistinctCustomersForPeriod(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(DISTINCT c.id)')
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.merchant', 'directMerchant')
+            ->leftJoin('c.merchants', 'linkedMerchant')
+            ->leftJoin('c.loyaltyCards', 'lc')
+            ->leftJoin('lc.merchant', 'cardMerchant')
+            ->where('directMerchant.id = :merchantId OR linkedMerchant.id = :merchantId OR cardMerchant.id = :merchantId')
+            ->andWhere('c.createdAt >= :from')
+            ->andWhere('c.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countCardsForPeriod(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(lc.id)')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('lc.createdAt >= :from')
+            ->andWhere('lc.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countTransactionsForPeriod(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(t.id)')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('t.createdAt >= :from')
+            ->andWhere('t.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countCardsTotal(Merchant $merchant): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(lc.id)')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countCompletedCardsTotal(Merchant $merchant): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(lc.id)')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id = :merchantId')
+            ->andWhere('lc.isCompleted = :completed')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('completed', true)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countDistinctCustomersTotal(Merchant $merchant): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(DISTINCT c.id)')
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.merchant', 'directMerchant')
+            ->leftJoin('c.merchants', 'linkedMerchant')
+            ->leftJoin('c.loyaltyCards', 'lc')
+            ->leftJoin('lc.merchant', 'cardMerchant')
+            ->where('directMerchant.id = :merchantId OR linkedMerchant.id = :merchantId OR cardMerchant.id = :merchantId')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    private function countDistinctActiveCustomersForPeriod(Merchant $merchant, \DateTimeImmutable $from, \DateTimeImmutable $to): int
+    {
+        $merchantId = $merchant->getId();
+        if (!$merchantId instanceof Uuid) {
+            return 0;
+        }
+
+        return (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(DISTINCT c.id)')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->join('t.loyaltyCard', 'lc')
+            ->join('lc.customer', 'c')
+            ->where('m.id = :merchantId')
+            ->andWhere('t.createdAt >= :from')
+            ->andWhere('t.createdAt < :to')
+            ->setParameter('merchantId', $merchantId, 'uuid')
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->getQuery()
+            ->getSingleScalarResult();
     }
 
     private function formatPlan(?\App\Entity\Plan $plan): ?array
