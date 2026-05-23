@@ -22,6 +22,8 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
 
 class SuperAdminController extends AbstractController
 {
@@ -32,6 +34,7 @@ class SuperAdminController extends AbstractController
         private readonly EntityManagerInterface $em,
         private readonly MerchantAssetDownloadEventRepository $assetDownloadEventRepository,
         private readonly PlanRepository $planRepository,
+        private readonly CacheInterface $cache,
     ) {
     }
 
@@ -515,6 +518,221 @@ class SuperAdminController extends AbstractController
         $contestsSeries = $bucketRows($contests, 'createdAt', $months);
         $loyaltyCardsSeries = $bucketRows($loyaltyCards, 'createdAt', $months);
 
+        // Unified merchant KPIs (same business view as merchant dashboard, aggregated over all merchants)
+        $monthKeys = $months;
+        $historyMonthKeys = array_slice($monthKeys, 0, 11);
+        $historyStart = \DateTimeImmutable::createFromFormat('Y-m-d', $historyMonthKeys[0] . '-01')->setTime(0, 0, 0);
+        $currentMonthStart = \DateTimeImmutable::createFromFormat('Y-m-d', $monthKeys[11] . '-01')->setTime(0, 0, 0);
+        $nextMonthStart = $currentMonthStart->modify('+1 month');
+
+        $rowsToMonthMap = static function (array $rows): array {
+            $map = [];
+            foreach ($rows as $row) {
+                $ym = (string) ($row['ym'] ?? '');
+                if (preg_match('/^\d{4}-\d{2}$/', $ym) === 1) {
+                    $map[$ym] = (int) ($row['total'] ?? 0);
+                }
+            }
+
+            return $map;
+        };
+
+        $fetchMonthlyDistinctCustomers = function (\DateTimeImmutable $fromDate, \DateTimeImmutable $toDate) use ($rowsToMonthMap): array {
+            $rows = $this->em->createQueryBuilder()
+                ->select('SUBSTRING(c.createdAt, 1, 7) AS ym', 'COUNT(DISTINCT c.id) AS total')
+                ->from(Customer::class, 'c')
+                ->leftJoin('c.merchant', 'directMerchant')
+                ->leftJoin('c.merchants', 'linkedMerchant')
+                ->leftJoin('c.loyaltyCards', 'lc')
+                ->leftJoin('lc.merchant', 'cardMerchant')
+                ->where('directMerchant.id IS NOT NULL OR linkedMerchant.id IS NOT NULL OR cardMerchant.id IS NOT NULL')
+                ->andWhere('c.createdAt >= :from')
+                ->andWhere('c.createdAt < :to')
+                ->setParameter('from', $fromDate)
+                ->setParameter('to', $toDate)
+                ->groupBy('ym')
+                ->getQuery()
+                ->getArrayResult();
+
+            return $rowsToMonthMap($rows);
+        };
+
+        $fetchMonthlyCards = function (\DateTimeImmutable $fromDate, \DateTimeImmutable $toDate) use ($rowsToMonthMap): array {
+            $rows = $this->em->createQueryBuilder()
+                ->select('SUBSTRING(lc.createdAt, 1, 7) AS ym', 'COUNT(lc.id) AS total')
+                ->from(LoyaltyCard::class, 'lc')
+                ->join('lc.merchant', 'm')
+                ->where('m.id IS NOT NULL')
+                ->andWhere('lc.createdAt >= :from')
+                ->andWhere('lc.createdAt < :to')
+                ->setParameter('from', $fromDate)
+                ->setParameter('to', $toDate)
+                ->groupBy('ym')
+                ->getQuery()
+                ->getArrayResult();
+
+            return $rowsToMonthMap($rows);
+        };
+
+        $fetchMonthlyTransactions = function (\DateTimeImmutable $fromDate, \DateTimeImmutable $toDate) use ($rowsToMonthMap): array {
+            $rows = $this->em->createQueryBuilder()
+                ->select('SUBSTRING(t.createdAt, 1, 7) AS ym', 'COUNT(t.id) AS total')
+                ->from(Transaction::class, 't')
+                ->join('t.merchant', 'm')
+                ->where('m.id IS NOT NULL')
+                ->andWhere('t.createdAt >= :from')
+                ->andWhere('t.createdAt < :to')
+                ->setParameter('from', $fromDate)
+                ->setParameter('to', $toDate)
+                ->groupBy('ym')
+                ->getQuery()
+                ->getArrayResult();
+
+            return $rowsToMonthMap($rows);
+        };
+
+        $historyCacheKey = sprintf('super_admin_dashboard_kpis_unified_history_v1_%s_to_%s', $historyMonthKeys[0], $historyMonthKeys[10]);
+
+        $historicalUnified = $this->cache->get($historyCacheKey, function (ItemInterface $item) use ($historyStart, $currentMonthStart, $fetchMonthlyDistinctCustomers, $fetchMonthlyCards, $fetchMonthlyTransactions): array {
+            // Historical months are immutable by definition, safe to cache longer.
+            $item->expiresAfter(86400 * 30);
+
+            return [
+                'customers_new' => $fetchMonthlyDistinctCustomers($historyStart, $currentMonthStart),
+                'loyalty_cards_new' => $fetchMonthlyCards($historyStart, $currentMonthStart),
+                'transactions_scanned' => $fetchMonthlyTransactions($historyStart, $currentMonthStart),
+            ];
+        });
+
+        $currentUnified = [
+            'customers_new' => (int) $this->em->createQueryBuilder()
+                ->select('COUNT(DISTINCT c.id)')
+                ->from(Customer::class, 'c')
+                ->leftJoin('c.merchant', 'directMerchant')
+                ->leftJoin('c.merchants', 'linkedMerchant')
+                ->leftJoin('c.loyaltyCards', 'lc')
+                ->leftJoin('lc.merchant', 'cardMerchant')
+                ->where('directMerchant.id IS NOT NULL OR linkedMerchant.id IS NOT NULL OR cardMerchant.id IS NOT NULL')
+                ->andWhere('c.createdAt >= :from')
+                ->andWhere('c.createdAt < :to')
+                ->setParameter('from', $currentMonthStart)
+                ->setParameter('to', $nextMonthStart)
+                ->getQuery()
+                ->getSingleScalarResult(),
+            'loyalty_cards_new' => (int) $this->em->createQueryBuilder()
+                ->select('COUNT(lc.id)')
+                ->from(LoyaltyCard::class, 'lc')
+                ->join('lc.merchant', 'm')
+                ->where('m.id IS NOT NULL')
+                ->andWhere('lc.createdAt >= :from')
+                ->andWhere('lc.createdAt < :to')
+                ->setParameter('from', $currentMonthStart)
+                ->setParameter('to', $nextMonthStart)
+                ->getQuery()
+                ->getSingleScalarResult(),
+            'transactions_scanned' => (int) $this->em->createQueryBuilder()
+                ->select('COUNT(t.id)')
+                ->from(Transaction::class, 't')
+                ->join('t.merchant', 'm')
+                ->where('m.id IS NOT NULL')
+                ->andWhere('t.createdAt >= :from')
+                ->andWhere('t.createdAt < :to')
+                ->setParameter('from', $currentMonthStart)
+                ->setParameter('to', $nextMonthStart)
+                ->getQuery()
+                ->getSingleScalarResult(),
+        ];
+
+        $customersUnifiedByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $customersUnifiedByMonth[$ym] = (int) ($historicalUnified['customers_new'][$ym] ?? 0);
+        }
+        $customersUnifiedByMonth[$monthKeys[11]] = $currentUnified['customers_new'];
+
+        $cardsUnifiedByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $cardsUnifiedByMonth[$ym] = (int) ($historicalUnified['loyalty_cards_new'][$ym] ?? 0);
+        }
+        $cardsUnifiedByMonth[$monthKeys[11]] = $currentUnified['loyalty_cards_new'];
+
+        $transactionsUnifiedByMonth = array_fill_keys($monthKeys, 0);
+        foreach ($historyMonthKeys as $ym) {
+            $transactionsUnifiedByMonth[$ym] = (int) ($historicalUnified['transactions_scanned'][$ym] ?? 0);
+        }
+        $transactionsUnifiedByMonth[$monthKeys[11]] = $currentUnified['transactions_scanned'];
+
+        $rolling30Start = (new \DateTimeImmutable())->modify('-30 days');
+        $rolling30End = new \DateTimeImmutable();
+
+        $totalCardsUnified = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(lc.id)')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id IS NOT NULL')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $completedCardsUnified = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(lc.id)')
+            ->from(LoyaltyCard::class, 'lc')
+            ->join('lc.merchant', 'm')
+            ->where('m.id IS NOT NULL')
+            ->andWhere('lc.isCompleted = :completed')
+            ->setParameter('completed', true)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $completionRateUnified = $totalCardsUnified > 0 ? round(($completedCardsUnified / $totalCardsUnified) * 100, 1) : 0.0;
+
+        $totalCustomersUnified = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(DISTINCT c.id)')
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.merchant', 'directMerchant')
+            ->leftJoin('c.merchants', 'linkedMerchant')
+            ->leftJoin('c.loyaltyCards', 'lc')
+            ->leftJoin('lc.merchant', 'cardMerchant')
+            ->where('directMerchant.id IS NOT NULL OR linkedMerchant.id IS NOT NULL OR cardMerchant.id IS NOT NULL')
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $activeCustomers30dUnified = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(DISTINCT c.id)')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->join('t.loyaltyCard', 'lc')
+            ->join('lc.customer', 'c')
+            ->where('m.id IS NOT NULL')
+            ->andWhere('t.createdAt >= :from')
+            ->andWhere('t.createdAt < :to')
+            ->setParameter('from', $rolling30Start)
+            ->setParameter('to', $rolling30End)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $transactionsScanned30dUnified = (int) $this->em->createQueryBuilder()
+            ->select('COUNT(t.id)')
+            ->from(Transaction::class, 't')
+            ->join('t.merchant', 'm')
+            ->where('m.id IS NOT NULL')
+            ->andWhere('t.createdAt >= :from')
+            ->andWhere('t.createdAt < :to')
+            ->setParameter('from', $rolling30Start)
+            ->setParameter('to', $rolling30End)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $inactiveCustomers30dUnified = max($totalCustomersUnified - $activeCustomers30dUnified, 0);
+        $activeRate30dPctUnified = $totalCustomersUnified > 0 ? round(($activeCustomers30dUnified / $totalCustomersUnified) * 100, 1) : 0.0;
+        $avgScansPerActiveCustomer30dUnified = $activeCustomers30dUnified > 0
+            ? round($transactionsScanned30dUnified / $activeCustomers30dUnified, 2)
+            : 0.0;
+
+        $previousMonthScansUnified = (int) ($transactionsUnifiedByMonth[$monthKeys[10]] ?? 0);
+        $currentMonthScansUnified = (int) ($transactionsUnifiedByMonth[$monthKeys[11]] ?? 0);
+        $scansMoMChangePctUnified = $previousMonthScansUnified > 0
+            ? round((($currentMonthScansUnified - $previousMonthScansUnified) / $previousMonthScansUnified) * 100, 1)
+            : null;
+
         $activeSubscriptionsCurrent = (int) $this->em->createQueryBuilder()
             ->select('COUNT(m.id)')
             ->from(Merchant::class, 'm')
@@ -551,6 +769,27 @@ class SuperAdminController extends AbstractController
                 'totals' => [
                     'scans_last_12_months' => array_sum($scansSeries),
                     'loyalty_cards_distributed_last_12_months' => array_sum($loyaltyCardsSeries),
+                ],
+            ],
+            'merchant_unified' => [
+                'period_keys' => $monthKeys,
+                'period_labels' => $labels,
+                'customers_new' => array_values($customersUnifiedByMonth),
+                'loyalty_cards_new' => array_values($cardsUnifiedByMonth),
+                'transactions_scanned' => array_values($transactionsUnifiedByMonth),
+                'health_kpis' => [
+                    'completion_rate_pct' => $completionRateUnified,
+                    'total_customers' => $totalCustomersUnified,
+                    'active_customers_30d' => $activeCustomers30dUnified,
+                    'active_rate_30d_pct' => $activeRate30dPctUnified,
+                    'inactive_customers_30d' => $inactiveCustomers30dUnified,
+                    'transactions_scanned_30d' => $transactionsScanned30dUnified,
+                    'avg_scans_per_active_customer_30d' => $avgScansPerActiveCustomer30dUnified,
+                    'scans_month_over_month_change_pct' => $scansMoMChangePctUnified,
+                ],
+                'cache' => [
+                    'historical_months_cached' => true,
+                    'current_month_is_fresh' => true,
                 ],
             ],
         ]);
