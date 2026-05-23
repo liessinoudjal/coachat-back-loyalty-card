@@ -51,6 +51,18 @@ class Contest
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $drawDayNotificationSentAt = null;
 
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $dayBeforeNotificationRecipientCount = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $startNotificationRecipientCount = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $endingSoonNotificationRecipientCount = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $drawDayNotificationRecipientCount = null;
+
     #[ORM\Column(enumType: ContestStatus::class, length: 32)]
     private ContestStatus $status = ContestStatus::SCHEDULED;
 
@@ -191,6 +203,54 @@ class Contest
     public function setDrawDayNotificationSentAt(?\DateTimeImmutable $drawDayNotificationSentAt): self
     {
         $this->drawDayNotificationSentAt = $drawDayNotificationSentAt;
+
+        return $this;
+    }
+
+    public function getDayBeforeNotificationRecipientCount(): ?int
+    {
+        return $this->dayBeforeNotificationRecipientCount;
+    }
+
+    public function setDayBeforeNotificationRecipientCount(?int $dayBeforeNotificationRecipientCount): self
+    {
+        $this->dayBeforeNotificationRecipientCount = $dayBeforeNotificationRecipientCount;
+
+        return $this;
+    }
+
+    public function getStartNotificationRecipientCount(): ?int
+    {
+        return $this->startNotificationRecipientCount;
+    }
+
+    public function setStartNotificationRecipientCount(?int $startNotificationRecipientCount): self
+    {
+        $this->startNotificationRecipientCount = $startNotificationRecipientCount;
+
+        return $this;
+    }
+
+    public function getEndingSoonNotificationRecipientCount(): ?int
+    {
+        return $this->endingSoonNotificationRecipientCount;
+    }
+
+    public function setEndingSoonNotificationRecipientCount(?int $endingSoonNotificationRecipientCount): self
+    {
+        $this->endingSoonNotificationRecipientCount = $endingSoonNotificationRecipientCount;
+
+        return $this;
+    }
+
+    public function getDrawDayNotificationRecipientCount(): ?int
+    {
+        return $this->drawDayNotificationRecipientCount;
+    }
+
+    public function setDrawDayNotificationRecipientCount(?int $drawDayNotificationRecipientCount): self
+    {
+        $this->drawDayNotificationRecipientCount = $drawDayNotificationRecipientCount;
 
         return $this;
     }

@@ -55,8 +55,10 @@ class ContestNotificationDispatcher
 
         $dayBeforeMarked = 0;
         foreach ($dayBeforeContests as $contest) {
-            $ok = $this->notifyForDayBeforeStart($contest);
-            if ($ok) {
+            $stats = $this->notifyForDayBeforeStart($contest);
+            $contest->setDayBeforeNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $contest->setDayBeforeNotificationSentAt(new \DateTimeImmutable());
                 $dayBeforeMarked++;
             }
@@ -64,8 +66,10 @@ class ContestNotificationDispatcher
 
         $startMarked = 0;
         foreach ($startContests as $contest) {
-            $ok = $this->notifyForStart($contest);
-            if ($ok) {
+            $stats = $this->notifyForStart($contest);
+            $contest->setStartNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $contest->setStartNotificationSentAt(new \DateTimeImmutable());
                 $contest->setStatus(ContestStatus::ACTIVE);
                 $startMarked++;
@@ -74,8 +78,10 @@ class ContestNotificationDispatcher
 
         $endingMarked = 0;
         foreach ($endingSoonContests as $contest) {
-            $ok = $this->notifyForEndingSoon($contest);
-            if ($ok) {
+            $stats = $this->notifyForEndingSoon($contest);
+            $contest->setEndingSoonNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $contest->setEndingSoonNotificationSentAt(new \DateTimeImmutable());
                 $endingMarked++;
             }
@@ -83,8 +89,10 @@ class ContestNotificationDispatcher
 
         $drawDayMarked = 0;
         foreach ($drawDayContests as $contest) {
-            $ok = $this->notifyForDrawDay($contest);
-            if ($ok) {
+            $stats = $this->notifyForDrawDay($contest);
+            $contest->setDrawDayNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $contest->setDrawDayNotificationSentAt(new \DateTimeImmutable());
                 $drawDayMarked++;
             }
@@ -177,11 +185,14 @@ class ContestNotificationDispatcher
         return $result;
     }
 
-    private function notifyForDayBeforeStart(Contest $contest): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForDayBeforeStart(Contest $contest): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         return $this->notifyContestCustomers(
@@ -190,11 +201,14 @@ class ContestNotificationDispatcher
         );
     }
 
-    private function notifyForStart(Contest $contest): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForStart(Contest $contest): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         return $this->notifyContestCustomers(
@@ -203,11 +217,14 @@ class ContestNotificationDispatcher
         );
     }
 
-    private function notifyForEndingSoon(Contest $contest): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForEndingSoon(Contest $contest): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         return $this->notifyContestCustomers(
@@ -216,11 +233,14 @@ class ContestNotificationDispatcher
         );
     }
 
-    private function notifyForDrawDay(Contest $contest): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForDrawDay(Contest $contest): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         return $this->notifyContestParticipants(
@@ -231,18 +251,24 @@ class ContestNotificationDispatcher
 
     /**
      * @param callable(Customer): bool $sendCallback
+     *
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
      */
-    private function notifyContestCustomers(Contest $contest, callable $sendCallback): bool
+    private function notifyContestCustomers(Contest $contest, callable $sendCallback): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         $participantIds = array_flip($this->participationRepository->findParticipantCustomerIds($contest));
         $customers = $this->customerRepository->findByMerchant($merchant);
 
-        $hasFailure = false;
+        $attempted = 0;
+        $sentCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+
         foreach ($customers as $customer) {
             $customerId = $customer->getId();
             if ($customerId !== null && isset($participantIds[$customerId])) {
@@ -250,26 +276,39 @@ class ContestNotificationDispatcher
             }
 
             if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                $skippedCount++;
                 continue;
             }
 
+            $attempted++;
+
             $sent = $sendCallback($customer);
-            if (!$sent) {
-                $hasFailure = true;
+            if ($sent) {
+                $sentCount++;
+            } else {
+                $failedCount++;
             }
         }
 
-        return !$hasFailure;
+        return [
+            'attempted' => $attempted,
+            'sent' => $sentCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'all_sent' => $failedCount === 0,
+        ];
     }
 
     /**
      * @param callable(Customer, int): bool $sendCallback
+     *
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
      */
-    private function notifyContestParticipants(Contest $contest, callable $sendCallback): bool
+    private function notifyContestParticipants(Contest $contest, callable $sendCallback): array
     {
         $merchant = $contest->getMerchant();
         if ($merchant === null) {
-            return false;
+            return $this->emptyStats();
         }
 
         $participantSummaryMap = [];
@@ -283,12 +322,22 @@ class ContestNotificationDispatcher
         }
 
         if ($participantSummaryMap === []) {
-            return true;
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => true,
+            ];
         }
 
         $customers = $this->customerRepository->findByMerchant($merchant);
 
-        $hasFailure = false;
+        $attempted = 0;
+        $sentCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+
         foreach ($customers as $customer) {
             $customerId = $customer->getId();
             if ($customerId === null || !isset($participantSummaryMap[$customerId])) {
@@ -296,16 +345,41 @@ class ContestNotificationDispatcher
             }
 
             if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                $skippedCount++;
                 continue;
             }
 
+            $attempted++;
+
             $sent = $sendCallback($customer, $participantSummaryMap[$customerId]);
-            if (!$sent) {
-                $hasFailure = true;
+            if ($sent) {
+                $sentCount++;
+            } else {
+                $failedCount++;
             }
         }
 
-        return !$hasFailure;
+        return [
+            'attempted' => $attempted,
+            'sent' => $sentCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'all_sent' => $failedCount === 0,
+        ];
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function emptyStats(): array
+    {
+        return [
+            'attempted' => 0,
+            'sent' => 0,
+            'failed' => 0,
+            'skipped' => 0,
+            'all_sent' => false,
+        ];
     }
 
     private function canReceiveContestNotification(Customer $customer, \App\Entity\Merchant $merchant): bool

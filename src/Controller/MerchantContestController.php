@@ -558,6 +558,14 @@ class MerchantContestController extends AbstractController
             'end_at' => $contest->getEndAt()?->format(DATE_ATOM),
             'draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
             'status' => $contest->getStatus()->value,
+            'day_before_notification_sent_at' => $contest->getDayBeforeNotificationSentAt()?->format(DATE_ATOM),
+            'start_notification_sent_at' => $contest->getStartNotificationSentAt()?->format(DATE_ATOM),
+            'ending_soon_notification_sent_at' => $contest->getEndingSoonNotificationSentAt()?->format(DATE_ATOM),
+            'draw_day_notification_sent_at' => $contest->getDrawDayNotificationSentAt()?->format(DATE_ATOM),
+            'day_before_notification_recipient_count' => $contest->getDayBeforeNotificationRecipientCount(),
+            'start_notification_recipient_count' => $contest->getStartNotificationRecipientCount(),
+            'ending_soon_notification_recipient_count' => $contest->getEndingSoonNotificationRecipientCount(),
+            'draw_day_notification_recipient_count' => $contest->getDrawDayNotificationRecipientCount(),
             'rewards' => array_map(
                 static fn (ContestReward $reward) => [
                     'id' => $reward->getId(),

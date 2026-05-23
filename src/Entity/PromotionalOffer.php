@@ -43,6 +43,15 @@ class PromotionalOffer
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $dayBeforeNotificationSentAt = null;
 
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $startNotificationRecipientCount = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $endingSoonNotificationRecipientCount = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $dayBeforeNotificationRecipientCount = null;
+
     #[ORM\Column(type: Types::DATETIME_IMMUTABLE)]
     private ?\DateTimeImmutable $createdAt = null;
 
@@ -146,6 +155,42 @@ class PromotionalOffer
     public function setDayBeforeNotificationSentAt(?\DateTimeImmutable $dayBeforeNotificationSentAt): static
     {
         $this->dayBeforeNotificationSentAt = $dayBeforeNotificationSentAt;
+
+        return $this;
+    }
+
+    public function getStartNotificationRecipientCount(): ?int
+    {
+        return $this->startNotificationRecipientCount;
+    }
+
+    public function setStartNotificationRecipientCount(?int $startNotificationRecipientCount): static
+    {
+        $this->startNotificationRecipientCount = $startNotificationRecipientCount;
+
+        return $this;
+    }
+
+    public function getEndingSoonNotificationRecipientCount(): ?int
+    {
+        return $this->endingSoonNotificationRecipientCount;
+    }
+
+    public function setEndingSoonNotificationRecipientCount(?int $endingSoonNotificationRecipientCount): static
+    {
+        $this->endingSoonNotificationRecipientCount = $endingSoonNotificationRecipientCount;
+
+        return $this;
+    }
+
+    public function getDayBeforeNotificationRecipientCount(): ?int
+    {
+        return $this->dayBeforeNotificationRecipientCount;
+    }
+
+    public function setDayBeforeNotificationRecipientCount(?int $dayBeforeNotificationRecipientCount): static
+    {
+        $this->dayBeforeNotificationRecipientCount = $dayBeforeNotificationRecipientCount;
 
         return $this;
     }
