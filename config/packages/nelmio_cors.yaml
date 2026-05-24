@@ -1,13 +1,7 @@
 nelmio_cors:
     defaults:
-        origin_regex: false
-        allow_origin:
-            - 'http://localhost:5173'
-            - 'http://127.0.0.1:5173'
-            - 'https://coachat.fr'
-            - 'https://la-carte.coachat.fr'
-            - 'https://lakarte.fr'
-            - 'https://www.lakarte.fr'
+        origin_regex: true
+        allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']
         allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
         allow_headers: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
         allow_credentials: true
@@ -15,13 +9,7 @@ nelmio_cors:
         max_age: 3600
     paths:
         '^/':
-            allow_origin:
-                - 'http://localhost:5173'
-                - 'http://127.0.0.1:5173'
-                - 'https://coachat.fr'
-                - 'https://la-carte.coachat.fr'
-                - 'https://lakarte.fr'
-                - 'https://www.lakarte.fr'
+            allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']
             allow_headers: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
             allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
             allow_credentials: true
