@@ -1,0 +1,453 @@
+<?php
+
+namespace App\Service;
+
+use App\Entity\Contest;
+use App\Entity\Customer;
+use App\Entity\CustomerMerchantNotificationPreference;
+use App\Enum\ContestStatus;
+use App\Repository\ContestParticipationRepository;
+use App\Repository\ContestRepository;
+use App\Repository\CustomerMerchantNotificationPreferenceRepository;
+use App\Repository\CustomerRepository;
+use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
+
+class ContestNotificationDispatcher
+{
+    public function __construct(
+        private readonly ContestRepository $contestRepository,
+        private readonly CustomerRepository $customerRepository,
+        private readonly CustomerMerchantNotificationPreferenceRepository $preferenceRepository,
+        private readonly ContestParticipationRepository $participationRepository,
+        private readonly NotificationService $notificationService,
+        private readonly EntityManagerInterface $entityManager,
+        private readonly LoggerInterface $logger,
+    ) {
+    }
+
+    /**
+        * @return array{day_before_notifications_sent_for_contests: int, start_notifications_sent_for_contests: int, ending_soon_notifications_sent_for_contests: int, draw_day_notifications_sent_for_contests: int}
+     */
+    public function dispatch(\DateTimeImmutable $today): array
+    {
+        $dayStart = $today->setTime(0, 0, 0);
+
+        $tomorrowStart = $dayStart->modify('+1 day');
+        $tomorrowEnd = $tomorrowStart->modify('+1 day');
+        $dayBeforeContests = $this->contestRepository->findDayBeforeStartBetween($tomorrowStart, $tomorrowEnd);
+
+        $startContests = $this->contestRepository->findStartingBetween($dayStart, $dayStart->modify('+1 day'));
+
+        $endingSoonStart = $dayStart->modify('+2 days');
+        $endingSoonEnd = $endingSoonStart->modify('+1 day');
+        $endingSoonContests = $this->contestRepository->findEndingBetween($endingSoonStart, $endingSoonEnd);
+
+        $drawDayContests = $this->contestRepository->findDrawDayBetween($dayStart, $dayStart->modify('+1 day'));
+
+        $this->logger->info('contest.dispatch.started', [
+            'today' => $today->format('Y-m-d'),
+            'day_before_count' => count($dayBeforeContests),
+            'start_count' => count($startContests),
+            'ending_soon_count' => count($endingSoonContests),
+            'draw_day_count' => count($drawDayContests),
+        ]);
+
+        $dayBeforeMarked = 0;
+        foreach ($dayBeforeContests as $contest) {
+            $stats = $this->notifyForDayBeforeStart($contest);
+            $contest->setDayBeforeNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
+                $contest->setDayBeforeNotificationSentAt(new \DateTimeImmutable());
+                $dayBeforeMarked++;
+            }
+        }
+
+        $startMarked = 0;
+        foreach ($startContests as $contest) {
+            $stats = $this->notifyForStart($contest);
+            $contest->setStartNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
+                $contest->setStartNotificationSentAt(new \DateTimeImmutable());
+                $contest->setStatus(ContestStatus::ACTIVE);
+                $startMarked++;
+            }
+        }
+
+        $endingMarked = 0;
+        foreach ($endingSoonContests as $contest) {
+            $stats = $this->notifyForEndingSoon($contest);
+            $contest->setEndingSoonNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
+                $contest->setEndingSoonNotificationSentAt(new \DateTimeImmutable());
+                $endingMarked++;
+            }
+        }
+
+        $drawDayMarked = 0;
+        foreach ($drawDayContests as $contest) {
+            $stats = $this->notifyForDrawDay($contest);
+            $contest->setDrawDayNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
+                $contest->setDrawDayNotificationSentAt(new \DateTimeImmutable());
+                $drawDayMarked++;
+            }
+        }
+
+        $this->entityManager->flush();
+
+        $this->logger->info('contest.dispatch.completed', [
+            'today' => $today->format('Y-m-d'),
+            'day_before_notifications_sent_for_contests' => $dayBeforeMarked,
+            'start_notifications_sent_for_contests' => $startMarked,
+            'ending_soon_notifications_sent_for_contests' => $endingMarked,
+            'draw_day_notifications_sent_for_contests' => $drawDayMarked,
+        ]);
+
+        return [
+            'day_before_notifications_sent_for_contests' => $dayBeforeMarked,
+            'start_notifications_sent_for_contests' => $startMarked,
+            'ending_soon_notifications_sent_for_contests' => $endingMarked,
+            'draw_day_notifications_sent_for_contests' => $drawDayMarked,
+        ];
+    }
+
+    /**
+     * Preview recipients and contest counts for a given day without sending emails.
+     *
+     * @return array{
+     *   day_before_notifications_would_be_sent_for_contests: int,
+     *   start_notifications_would_be_sent_for_contests: int,
+     *   ending_soon_notifications_would_be_sent_for_contests: int,
+    *   draw_day_notifications_would_be_sent_for_contests: int,
+     *   day_before_targeted_contests: int,
+     *   start_targeted_contests: int,
+    *   ending_soon_targeted_contests: int,
+    *   draw_day_targeted_contests: int
+     * }
+     */
+    public function preview(\DateTimeImmutable $today): array
+    {
+        $dayStart = $today->setTime(0, 0, 0);
+
+        $tomorrowStart = $dayStart->modify('+1 day');
+        $tomorrowEnd = $tomorrowStart->modify('+1 day');
+        $dayBeforeContests = $this->contestRepository->findDayBeforeStartBetween($tomorrowStart, $tomorrowEnd);
+
+        $startContests = $this->contestRepository->findStartingBetween($dayStart, $dayStart->modify('+1 day'));
+
+        $endingSoonStart = $dayStart->modify('+2 days');
+        $endingSoonEnd = $endingSoonStart->modify('+1 day');
+        $endingSoonContests = $this->contestRepository->findEndingBetween($endingSoonStart, $endingSoonEnd);
+
+        $drawDayContests = $this->contestRepository->findDrawDayBetween($dayStart, $dayStart->modify('+1 day'));
+
+        $dayBeforeWouldSend = 0;
+        foreach ($dayBeforeContests as $contest) {
+            $dayBeforeWouldSend += $this->countContestRecipients($contest);
+        }
+
+        $startWouldSend = 0;
+        foreach ($startContests as $contest) {
+            $startWouldSend += $this->countContestRecipients($contest);
+        }
+
+        $endingSoonWouldSend = 0;
+        foreach ($endingSoonContests as $contest) {
+            $endingSoonWouldSend += $this->countContestRecipients($contest);
+        }
+
+        $drawDayWouldSend = 0;
+        foreach ($drawDayContests as $contest) {
+            $drawDayWouldSend += $this->countContestParticipantRecipients($contest);
+        }
+
+        $result = [
+            'day_before_notifications_would_be_sent_for_contests' => $dayBeforeWouldSend,
+            'start_notifications_would_be_sent_for_contests' => $startWouldSend,
+            'ending_soon_notifications_would_be_sent_for_contests' => $endingSoonWouldSend,
+            'draw_day_notifications_would_be_sent_for_contests' => $drawDayWouldSend,
+            'day_before_targeted_contests' => count($dayBeforeContests),
+            'start_targeted_contests' => count($startContests),
+            'ending_soon_targeted_contests' => count($endingSoonContests),
+            'draw_day_targeted_contests' => count($drawDayContests),
+        ];
+
+        $this->logger->info('contest.dispatch.preview', [
+            'today' => $today->format('Y-m-d'),
+            ...$result,
+        ]);
+
+        return $result;
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForDayBeforeStart(Contest $contest): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        return $this->notifyContestCustomers(
+            $contest,
+            fn (Customer $customer): bool => $this->notificationService->notifyContestDayBeforeStart($customer, $merchant, $contest),
+        );
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForStart(Contest $contest): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        return $this->notifyContestCustomers(
+            $contest,
+            fn (Customer $customer): bool => $this->notificationService->notifyContestStarts($customer, $merchant, $contest),
+        );
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForEndingSoon(Contest $contest): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        return $this->notifyContestCustomers(
+            $contest,
+            fn (Customer $customer): bool => $this->notificationService->notifyContestEndingSoon($customer, $merchant, $contest),
+        );
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForDrawDay(Contest $contest): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        return $this->notifyContestParticipants(
+            $contest,
+            fn (Customer $customer, int $participationCount): bool => $this->notificationService->notifyContestDrawDay($customer, $merchant, $contest, $participationCount),
+        );
+    }
+
+    /**
+     * @param callable(Customer): bool $sendCallback
+     *
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyContestCustomers(Contest $contest, callable $sendCallback): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        $participantIds = array_flip($this->participationRepository->findParticipantCustomerIds($contest));
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $attempted = 0;
+        $sentCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId !== null && isset($participantIds[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                $skippedCount++;
+                continue;
+            }
+
+            $attempted++;
+
+            $sent = $sendCallback($customer);
+            if ($sent) {
+                $sentCount++;
+            } else {
+                $failedCount++;
+            }
+        }
+
+        return [
+            'attempted' => $attempted,
+            'sent' => $sentCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'all_sent' => $failedCount === 0,
+        ];
+    }
+
+    /**
+     * @param callable(Customer, int): bool $sendCallback
+     *
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyContestParticipants(Contest $contest, callable $sendCallback): array
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return $this->emptyStats();
+        }
+
+        $participantSummaryMap = [];
+        foreach ($this->participationRepository->getParticipantSummaries($contest) as $summary) {
+            $customerId = (int) ($summary['customer_id'] ?? 0);
+            if ($customerId <= 0) {
+                continue;
+            }
+
+            $participantSummaryMap[$customerId] = (int) ($summary['participation_count'] ?? 0);
+        }
+
+        if ($participantSummaryMap === []) {
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => true,
+            ];
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $attempted = 0;
+        $sentCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId === null || !isset($participantSummaryMap[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                $skippedCount++;
+                continue;
+            }
+
+            $attempted++;
+
+            $sent = $sendCallback($customer, $participantSummaryMap[$customerId]);
+            if ($sent) {
+                $sentCount++;
+            } else {
+                $failedCount++;
+            }
+        }
+
+        return [
+            'attempted' => $attempted,
+            'sent' => $sentCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'all_sent' => $failedCount === 0,
+        ];
+    }
+
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function emptyStats(): array
+    {
+        return [
+            'attempted' => 0,
+            'sent' => 0,
+            'failed' => 0,
+            'skipped' => 0,
+            'all_sent' => false,
+        ];
+    }
+
+    private function canReceiveContestNotification(Customer $customer, \App\Entity\Merchant $merchant): bool
+    {
+        $preference = $this->preferenceRepository->findOneByCustomerAndMerchant($customer, $merchant);
+
+        if (!$preference instanceof CustomerMerchantNotificationPreference) {
+            return true;
+        }
+
+        return $preference->isContestNotificationsEnabled();
+    }
+
+    private function countContestRecipients(Contest $contest): int
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return 0;
+        }
+
+        $participantIds = array_flip($this->participationRepository->findParticipantCustomerIds($contest));
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $count = 0;
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId !== null && isset($participantIds[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private function countContestParticipantRecipients(Contest $contest): int
+    {
+        $merchant = $contest->getMerchant();
+        if ($merchant === null) {
+            return 0;
+        }
+
+        $participantIds = array_flip($this->participationRepository->findParticipantCustomerIds($contest));
+        if ($participantIds === []) {
+            return 0;
+        }
+
+        $customers = $this->customerRepository->findByMerchant($merchant);
+
+        $count = 0;
+        foreach ($customers as $customer) {
+            $customerId = $customer->getId();
+            if ($customerId === null || !isset($participantIds[$customerId])) {
+                continue;
+            }
+
+            if (!$this->canReceiveContestNotification($customer, $merchant)) {
+                continue;
+            }
+
+            $count++;
+        }
+
+        return $count;
+    }
+}

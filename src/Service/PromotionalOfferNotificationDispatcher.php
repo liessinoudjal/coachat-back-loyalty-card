@@ -52,8 +52,10 @@ class PromotionalOfferNotificationDispatcher
                 'starts_on' => $offer->getStartsOn()?->format('Y-m-d'),
             ]);
 
-            $ok = $this->notifyForFlashDayBefore($offer);
-            if ($ok) {
+            $stats = $this->notifyForFlashDayBefore($offer);
+            $offer->setDayBeforeNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $offer->setDayBeforeNotificationSentAt(new \DateTimeImmutable());
                 $flashDayBeforeMarked++;
                 $this->signupAlertMailer->notifyFlashOfferDispatched($offer, 'day_before');
@@ -61,6 +63,7 @@ class PromotionalOfferNotificationDispatcher
                 $this->logger->warning('promotional_offer.dispatch.flash_day_before_failed_not_marked', [
                     'offer_id' => $offer->getId(),
                     'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                    'stats' => $stats,
                 ]);
             }
         }
@@ -78,8 +81,10 @@ class PromotionalOfferNotificationDispatcher
             ]);
 
             if ($offer->isFlash()) {
-                $ok = $this->notifyForFlashDayOf($offer);
-                if ($ok) {
+                $stats = $this->notifyForFlashDayOf($offer);
+                $offer->setStartNotificationRecipientCount($stats['sent']);
+
+                if ($stats['all_sent']) {
                     $offer->setStartNotificationSentAt(new \DateTimeImmutable());
                     $flashDayOfMarked++;
                     $this->signupAlertMailer->notifyFlashOfferDispatched($offer, 'day_of');
@@ -87,17 +92,21 @@ class PromotionalOfferNotificationDispatcher
                     $this->logger->warning('promotional_offer.dispatch.flash_day_of_failed_not_marked', [
                         'offer_id' => $offer->getId(),
                         'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                        'stats' => $stats,
                     ]);
                 }
             } else {
-                $startOk = $this->notifyForOfferStart($offer);
-                if ($startOk) {
+                $stats = $this->notifyForOfferStart($offer);
+                $offer->setStartNotificationRecipientCount($stats['sent']);
+
+                if ($stats['all_sent']) {
                     $offer->setStartNotificationSentAt(new \DateTimeImmutable());
                     $startMarked++;
                 } else {
                     $this->logger->warning('promotional_offer.dispatch.start_offer_failed_not_marked', [
                         'offer_id' => $offer->getId(),
                         'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                        'stats' => $stats,
                     ]);
                 }
             }
@@ -112,14 +121,17 @@ class PromotionalOfferNotificationDispatcher
                 'ends_on' => $offer->getEndsOn()?->format('Y-m-d'),
             ]);
 
-            $endingOk = $this->notifyForOfferEndingSoon($offer);
-            if ($endingOk) {
+            $stats = $this->notifyForOfferEndingSoon($offer);
+            $offer->setEndingSoonNotificationRecipientCount($stats['sent']);
+
+            if ($stats['all_sent']) {
                 $offer->setEndingSoonNotificationSentAt(new \DateTimeImmutable());
                 $endingMarked++;
             } else {
                 $this->logger->warning('promotional_offer.dispatch.ending_offer_failed_not_marked', [
                     'offer_id' => $offer->getId(),
                     'merchant_id' => $offer->getMerchant()?->getId()?->toRfc4122(),
+                    'stats' => $stats,
                 ]);
             }
         }
@@ -142,57 +154,58 @@ class PromotionalOfferNotificationDispatcher
         ];
     }
 
-    private function notifyForFlashDayBefore(PromotionalOffer $offer): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForFlashDayBefore(PromotionalOffer $offer): array
     {
         $merchant = $offer->getMerchant();
         if ($merchant === null) {
             $this->logger->warning('promotional_offer.dispatch.flash_day_before_skipped_missing_merchant', ['offer_id' => $offer->getId()]);
 
-            return false;
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => false,
+            ];
         }
 
-        $customers = $this->customerRepository->findByMerchant($merchant);
-        $hasFailure = false;
-        foreach ($customers as $customer) {
-            if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
-                continue;
-            }
-
-            $sent = $this->notificationService->notifyPromotionalOfferFlashDayBefore($customer, $merchant, $offer);
-            if (!$sent) {
-                $hasFailure = true;
-            }
-        }
-
-        return !$hasFailure;
+        return $this->notifyEligibleCustomers(
+            $offer,
+            fn (Customer $customer) => $this->notificationService->notifyPromotionalOfferFlashDayBefore($customer, $merchant, $offer),
+        );
     }
 
-    private function notifyForFlashDayOf(PromotionalOffer $offer): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForFlashDayOf(PromotionalOffer $offer): array
     {
         $merchant = $offer->getMerchant();
         if ($merchant === null) {
             $this->logger->warning('promotional_offer.dispatch.flash_day_of_skipped_missing_merchant', ['offer_id' => $offer->getId()]);
 
-            return false;
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => false,
+            ];
         }
 
-        $customers = $this->customerRepository->findByMerchant($merchant);
-        $hasFailure = false;
-        foreach ($customers as $customer) {
-            if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
-                continue;
-            }
-
-            $sent = $this->notificationService->notifyPromotionalOfferFlashDayOf($customer, $merchant, $offer);
-            if (!$sent) {
-                $hasFailure = true;
-            }
-        }
-
-        return !$hasFailure;
+        return $this->notifyEligibleCustomers(
+            $offer,
+            fn (Customer $customer) => $this->notificationService->notifyPromotionalOfferFlashDayOf($customer, $merchant, $offer),
+        );
     }
 
-    private function notifyForOfferStart(PromotionalOffer $offer): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForOfferStart(PromotionalOffer $offer): array
     {
         $merchant = $offer->getMerchant();
         if ($merchant === null) {
@@ -200,50 +213,25 @@ class PromotionalOfferNotificationDispatcher
                 'offer_id' => $offer->getId(),
             ]);
 
-            return false;
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => false,
+            ];
         }
 
-        $customers = $this->customerRepository->findByMerchant($merchant);
-        $this->logger->debug('promotional_offer.dispatch.start_offer_customers_loaded', [
-            'offer_id' => $offer->getId(),
-            'merchant_id' => $merchant->getId()?->toRfc4122(),
-            'customer_count' => count($customers),
-        ]);
-
-        $hasFailure = false;
-        foreach ($customers as $customer) {
-            if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
-                $this->logger->debug('promotional_offer.dispatch.start_offer_customer_skipped_preference', [
-                    'offer_id' => $offer->getId(),
-                    'merchant_id' => $merchant->getId()?->toRfc4122(),
-                    'customer_id' => $customer->getId(),
-                ]);
-
-                continue;
-            }
-
-            $sent = $this->notificationService->notifyPromotionalOfferStarts($customer, $merchant, $offer);
-            if (!$sent) {
-                $hasFailure = true;
-
-                $this->logger->warning('promotional_offer.dispatch.start_offer_customer_notification_failed', [
-                    'offer_id' => $offer->getId(),
-                    'merchant_id' => $merchant->getId()?->toRfc4122(),
-                    'customer_id' => $customer->getId(),
-                ]);
-            }
-
-            $this->logger->debug('promotional_offer.dispatch.start_offer_customer_notified', [
-                'offer_id' => $offer->getId(),
-                'merchant_id' => $merchant->getId()?->toRfc4122(),
-                'customer_id' => $customer->getId(),
-            ]);
-        }
-
-        return !$hasFailure;
+        return $this->notifyEligibleCustomers(
+            $offer,
+            fn (Customer $customer) => $this->notificationService->notifyPromotionalOfferStarts($customer, $merchant, $offer),
+        );
     }
 
-    private function notifyForOfferEndingSoon(PromotionalOffer $offer): bool
+    /**
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyForOfferEndingSoon(PromotionalOffer $offer): array
     {
         $merchant = $offer->getMerchant();
         if ($merchant === null) {
@@ -251,20 +239,55 @@ class PromotionalOfferNotificationDispatcher
                 'offer_id' => $offer->getId(),
             ]);
 
-            return false;
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => false,
+            ];
+        }
+
+        return $this->notifyEligibleCustomers(
+            $offer,
+            fn (Customer $customer) => $this->notificationService->notifyPromotionalOfferEndingSoon($customer, $merchant, $offer),
+        );
+    }
+
+    /**
+     * @param callable(Customer): bool $sendCallback
+     *
+     * @return array{attempted: int, sent: int, failed: int, skipped: int, all_sent: bool}
+     */
+    private function notifyEligibleCustomers(PromotionalOffer $offer, callable $sendCallback): array
+    {
+        $merchant = $offer->getMerchant();
+        if ($merchant === null) {
+            return [
+                'attempted' => 0,
+                'sent' => 0,
+                'failed' => 0,
+                'skipped' => 0,
+                'all_sent' => false,
+            ];
         }
 
         $customers = $this->customerRepository->findByMerchant($merchant);
-        $this->logger->debug('promotional_offer.dispatch.ending_offer_customers_loaded', [
+        $this->logger->debug('promotional_offer.dispatch.offer_customers_loaded', [
             'offer_id' => $offer->getId(),
             'merchant_id' => $merchant->getId()?->toRfc4122(),
             'customer_count' => count($customers),
         ]);
 
-        $hasFailure = false;
+        $attempted = 0;
+        $sentCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+
         foreach ($customers as $customer) {
             if (!$this->canReceivePromotionalNotification($customer, $merchant)) {
-                $this->logger->debug('promotional_offer.dispatch.ending_offer_customer_skipped_preference', [
+                $skippedCount++;
+                $this->logger->debug('promotional_offer.dispatch.offer_customer_skipped_preference', [
                     'offer_id' => $offer->getId(),
                     'merchant_id' => $merchant->getId()?->toRfc4122(),
                     'customer_id' => $customer->getId(),
@@ -273,25 +296,35 @@ class PromotionalOfferNotificationDispatcher
                 continue;
             }
 
-            $sent = $this->notificationService->notifyPromotionalOfferEndingSoon($customer, $merchant, $offer);
-            if (!$sent) {
-                $hasFailure = true;
+            $attempted++;
 
-                $this->logger->warning('promotional_offer.dispatch.ending_offer_customer_notification_failed', [
+            $sent = $sendCallback($customer);
+            if ($sent) {
+                $sentCount++;
+            } else {
+                $failedCount++;
+
+                $this->logger->warning('promotional_offer.dispatch.offer_customer_notification_failed', [
                     'offer_id' => $offer->getId(),
                     'merchant_id' => $merchant->getId()?->toRfc4122(),
                     'customer_id' => $customer->getId(),
                 ]);
             }
 
-            $this->logger->debug('promotional_offer.dispatch.ending_offer_customer_notified', [
+            $this->logger->debug('promotional_offer.dispatch.offer_customer_notified', [
                 'offer_id' => $offer->getId(),
                 'merchant_id' => $merchant->getId()?->toRfc4122(),
                 'customer_id' => $customer->getId(),
             ]);
         }
 
-        return !$hasFailure;
+        return [
+            'attempted' => $attempted,
+            'sent' => $sentCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'all_sent' => $failedCount === 0,
+        ];
     }
 
     private function canReceivePromotionalNotification(Customer $customer, \App\Entity\Merchant $merchant): bool

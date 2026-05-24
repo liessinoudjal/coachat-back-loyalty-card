@@ -278,8 +278,9 @@ class CustomerController extends AbstractController
 
         $hasEnabled = array_key_exists('enabled', $data);
         $hasPromotionalOffersEnabled = array_key_exists('promotional_offers_enabled', $data);
+        $hasContestNotificationsEnabled = array_key_exists('contest_notifications_enabled', $data);
 
-        if (!$hasEnabled && !$hasPromotionalOffersEnabled) {
+        if (!$hasEnabled && !$hasPromotionalOffersEnabled && !$hasContestNotificationsEnabled) {
             return new JsonResponse(['error' => 'at_least_one_preference_required'], 400);
         }
 
@@ -289,6 +290,10 @@ class CustomerController extends AbstractController
 
         if ($hasPromotionalOffersEnabled && !is_bool($data['promotional_offers_enabled'])) {
             return new JsonResponse(['error' => 'promotional_offers_enabled must be a boolean'], 400);
+        }
+
+        if ($hasContestNotificationsEnabled && !is_bool($data['contest_notifications_enabled'])) {
+            return new JsonResponse(['error' => 'contest_notifications_enabled must be a boolean'], 400);
         }
 
         $preferenceRepository = $this->entityManager->getRepository(CustomerMerchantNotificationPreference::class);
@@ -310,6 +315,10 @@ class CustomerController extends AbstractController
 
         if ($hasPromotionalOffersEnabled) {
             $preference->setPromotionalOffersEnabled($data['promotional_offers_enabled']);
+        }
+
+        if ($hasContestNotificationsEnabled) {
+            $preference->setContestNotificationsEnabled($data['contest_notifications_enabled']);
         }
 
         $this->entityManager->flush();
@@ -711,6 +720,7 @@ class CustomerController extends AbstractController
         return [
             'enabled' => $preference?->isEnabled() ?? true,
             'promotional_offers_enabled' => $preference?->isPromotionalOffersEnabled() ?? true,
+            'contest_notifications_enabled' => $preference?->isContestNotificationsEnabled() ?? true,
             'available_channels' => [
                 'email' => true,
                 'push' => $pushAvailable,

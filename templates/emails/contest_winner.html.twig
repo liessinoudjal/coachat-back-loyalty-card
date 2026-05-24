@@ -1,0 +1,103 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:22px; font-weight:800; color:#111827; margin-bottom:14px;">
+        🎉 Bravo {{ customer.name ?? 'cher client' }} !
+    </div>
+
+    <div style="font-size:15px; line-height:1.7; color:#111827; margin-bottom:18px;">
+        Vous faites partie des <strong>gagnants</strong> du jeu concours
+        <strong>{{ contest_title }}</strong>
+        {% if merchant.companyName is defined and merchant.companyName %}
+            organisé par <strong>{{ merchant.companyName }}</strong>
+        {% endif %}.
+        Toute l'équipe vous félicite !
+    </div>
+
+    {# Reward highlight card #}
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%); border:1px solid #f59e0b; border-radius:18px; margin-bottom:20px;">
+        <tr>
+            <td style="padding:22px 22px 18px 22px; text-align:center;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:#92400e; font-weight:700; margin-bottom:8px;">
+                    🏆 Votre lot
+                    {% if reward_rank_label %} — {{ reward_rank_label }} tirage{% endif %}
+                </div>
+                <div style="font-size:24px; font-weight:800; color:#7c2d12; line-height:1.3; margin-bottom:8px;">
+                    {{ reward_title }}
+                </div>
+                {% if reward_description %}
+                    <div style="font-size:14px; line-height:1.6; color:#78350f;">
+                        {{ reward_description }}
+                    </div>
+                {% endif %}
+                {% if is_card_reward and reward_target_value %}
+                    <div style="margin-top:10px; font-size:13px; color:#92400e;">
+                        Objectif de la carte : <strong>{{ reward_target_value }}</strong> unités.
+                    </div>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    {# How to claim #}
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:18px;">
+        <tr>
+            <td style="padding:18px 20px;">
+                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:8px; font-weight:700;">
+                    Comment récupérer votre récompense
+                </div>
+                <div style="font-size:15px; line-height:1.7; color:#111827;">
+                    {{ reward_instructions }}
+                </div>
+
+                {% if is_card_reward %}
+                    <div style="margin-top:12px; padding:12px 14px; background-color:#eff6ff; border-left:3px solid #2563eb; border-radius:6px; font-size:14px; line-height:1.6; color:#1e3a8a;">
+                        Une carte de fidélité dédiée vient d'être créée dans votre tableau de bord.
+                        Faites-la scanner lors de votre prochaine visite pour activer votre lot.
+                    </div>
+                {% else %}
+                    <div style="margin-top:12px; padding:12px 14px; background-color:#f0fdf4; border-left:3px solid #16a34a; border-radius:6px; font-size:14px; line-height:1.6; color:#14532d;">
+                        Présentez en magasin le <strong>QR code</strong> disponible dans votre tableau de bord
+                        pour que le commerçant valide et vous remette votre lot.
+                    </div>
+
+                    {% if qr_code_token %}
+                        <div style="margin-top:12px; font-size:12px; color:#6b7280; word-break:break-all;">
+                            Référence QR : <code style="background:#f3f4f6; padding:2px 6px; border-radius:4px;">{{ qr_code_token }}</code>
+                        </div>
+                    {% endif %}
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    {# CTA #}
+    {% if dashboard_url %}
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:18px;">
+            <tr>
+                <td>
+                    <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 22px; border-radius:12px; font-size:15px; font-weight:700;">
+                        Voir ma récompense dans mon dashboard
+                    </a>
+                </td>
+            </tr>
+        </table>
+    {% endif %}
+
+    {% if contest_draw_at %}
+        <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
+            Date du tirage : {{ contest_draw_at }}.
+        </div>
+    {% endif %}
+
+    {% if contest_description %}
+        <div style="margin-top:14px; padding-top:14px; border-top:1px solid #e5e7eb; font-size:13px; line-height:1.6; color:#4b5563;">
+            <strong>À propos du concours :</strong><br>
+            {{ contest_description }}
+        </div>
+    {% endif %}
+
+    <div style="margin-top:16px; font-size:13px; line-height:1.6; color:#6b7280;">
+        Encore bravo et merci pour votre participation !
+    </div>
+{% endblock %}

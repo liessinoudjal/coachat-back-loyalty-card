@@ -1,0 +1,76 @@
+{% extends 'emails/signup_alert_base.html.twig' %}
+
+{% block email_body %}
+    <div style="font-size:20px; font-weight:700; color:#111827; margin-bottom:18px;">Bonjour {{ customer.name ?? 'client' }},</div>
+
+    <div style="font-size:15px; line-height:1.7; color:#111827; margin-bottom:14px;">
+        Plus que {{ days_left }} jours pour participer au jeu concours <strong>{{ contest_title }}</strong> chez {{ merchant.companyName ?? merchant.company_name ?? 'votre commerçant' }}.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#ffffff; border:1px solid #e5e7eb; border-radius:16px; box-shadow:0 1px 4px rgba(17,24,39,0.04); margin-bottom:16px;">
+        <tr>
+            <td style="padding:8px 20px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Détails du concours</div>
+                            <div style="font-size:15px; line-height:1.7; color:#111827; white-space:pre-line;">{{ contest_description }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Période</div>
+                            <div style="font-size:15px; line-height:1.7; color:#111827;">
+                                Du {{ contest_start_at }} au {{ contest_end_at }}
+                            </div>
+                        </td>
+                    </tr>
+                    {% if contest_draw_at is defined and contest_draw_at is not empty %}
+                        <tr>
+                            <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Tirage au sort</div>
+                                <div style="font-size:15px; line-height:1.7; color:#111827;">
+                                    {{ contest_draw_at }}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endif %}
+                    {% if contest_rewards is defined and contest_rewards|length > 0 %}
+                        <tr>
+                            <td style="padding:14px 0; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                                <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Lots à gagner</div>
+                                <ul style="margin:0; padding-left:18px; color:#111827; font-size:15px; line-height:1.7;">
+                                    {% for reward in contest_rewards %}
+                                        <li><strong>{{ reward.order_label }} tirage</strong> : {{ reward.title }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </td>
+                        </tr>
+                    {% endif %}
+                    <tr>
+                        <td style="padding:14px 0; vertical-align:top;">
+                            <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.8px; color:#6b7280; margin-bottom:6px;">Comment participer</div>
+                            <div style="font-size:15px; line-height:1.7; color:#111827;">
+                                Utilisez votre carte de fidélité en magasin lors de vos achats durant cette période.<br/>
+                                Plus vous faites scanner votre carte, plus vous augmentez vos chances de remporter un prix.<br/>
+                                Chaque client peut cumuler jusqu'à {{ participation_limit|default(10) }} participations sur ce concours.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:16px;">
+        <tr>
+            <td>
+                <a href="{{ dashboard_url }}" style="display:inline-block; background-color:#2563eb; color:#ffffff; text-decoration:none; padding:14px 18px; border-radius:12px; font-size:15px; font-weight:700;">Voir mon tableau de bord</a>
+            </td>
+        </tr>
+    </table>
+
+    <div style="margin-top:10px; font-size:13px; line-height:1.6; color:#6b7280;">
+        Vous pouvez désactiver à tout moment les notifications concours de ce commerçant depuis votre profil client.
+    </div>
+{% endblock %}

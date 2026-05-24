@@ -3,10 +3,12 @@
 namespace App\Controller;
 
 use App\Entity\Customer;
+use App\Entity\Contest;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
+use App\Enum\ContestStatus;
 use App\Exception\CustomerMerchantLimitReachedException;
 use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
@@ -87,6 +89,12 @@ final class MerchantMapController extends AbstractController
             array_map(fn($row) => $row['merchant'], $rows),
         );
 
+        // Pre-load visible contests (upcoming + active) indexed by merchant id
+        $contestsByMerchant = $this->indexVisibleContests(
+            array_map(fn($row) => $row['merchant'], $rows),
+            $this->nowInParis(),
+        );
+
         $today = new \DateTimeImmutable('today');
         $merchants = [];
         foreach ($rows as $row) {
@@ -132,6 +140,10 @@ final class MerchantMapController extends AbstractController
             $activeOffers = $isClaimed ? $this->collectActiveOffers($merchant, $today) : [];
             $hasActiveOffer = count($activeOffers) > 0;
 
+            // --- Visible contests (upcoming + active) ---
+            $visibleContests = $contestsByMerchant[$merchantId] ?? [];
+            $hasVisibleContests = count($visibleContests) > 0;
+
             // --- Google Review module ---
             $googleModule = $googleModulesByMerchant[$merchantId] ?? null;
             $googleReview = null;
@@ -154,18 +166,23 @@ final class MerchantMapController extends AbstractController
                 'address' => $merchant->getAddress(),
                 'postal_code' => $merchant->getPostalCode(),
                 'city' => $merchant->getCity(),
+                'establishment_type' => $merchant->getEstablishmentType()?->getCode(),
                 'phone' => $merchant->getPhone(),
                 'logo_url' => $merchant->getLogoUrl(),
+                'instagram_url' => $merchant->getInstagramUrl(),
+                'tiktok_url' => $merchant->getTiktokUrl(),
+                'website_url' => $merchant->getWebsiteUrl(),
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
                 'subscriber_count' => $subscriberCount,
                 'customer_signup_available' => $customerSignupAvailable,
                 'is_claimed' => $isClaimed,
-                'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
+                'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram || $hasVisibleContests,
                 'is_customer_linked' => isset($linkedMerchantIds[$merchantId]),
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,
+                'active_or_upcoming_contests' => $visibleContests,
                 'google_review' => $googleReview,
             ];
         }
@@ -218,8 +235,10 @@ final class MerchantMapController extends AbstractController
         }
 
         $today = new \DateTimeImmutable('today');
+        $searchMerchantEntities = array_values($merchantById);
+        $contestsByMerchant = $this->indexVisibleContests($searchMerchantEntities, $this->nowInParis());
 
-        $merchants = array_map(function (array $row) use ($merchantById, $today): array {
+        $merchants = array_map(function (array $row) use ($merchantById, $today, $contestsByMerchant): array {
             $merchantEntity = $merchantById[$row['id']] ?? null;
             $isClaimed = $merchantEntity instanceof Merchant && $merchantEntity->getUser() !== null;
             $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
@@ -228,18 +247,22 @@ final class MerchantMapController extends AbstractController
             $hasActiveOffers = $merchantEntity instanceof Merchant
                 ? ($isClaimed && count($this->collectActiveOffers($merchantEntity, $today)) > 0)
                 : false;
+            $merchantId = (string) $row['id'];
+            $hasVisibleContests = count($contestsByMerchant[$merchantId] ?? []) > 0;
 
             return [
-                'id' => $row['id'],
+                'id' => $merchantId,
                 'company_name' => $row['company_name'],
                 'address' => $row['address'],
                 'postal_code' => $row['postal_code'],
                 'city' => $row['city'],
+                'establishment_type' => $merchantEntity?->getEstablishmentType()?->getCode(),
                 'latitude' => $row['latitude'],
                 'longitude' => $row['longitude'],
                 'distance_km' => $row['distance_km'],
                 'has_loyalty_programs' => $hasLoyaltyPrograms,
                 'has_active_promotional_offers' => $hasActiveOffers,
+                'has_active_or_upcoming_contests' => $hasVisibleContests,
                 'is_claimed' => $isClaimed,
             ];
         }, $rows);
@@ -386,5 +409,74 @@ final class MerchantMapController extends AbstractController
             'description' => $o->getDescription(),
             'ends_on' => $o->getEndsOn()?->format('Y-m-d'),
         ], $offers);
+    }
+
+    /**
+     * @param array<int, Merchant> $merchants
+     * @return array<string, array<int, array{id:string,title:string,start_at:string,end_at:string,status:string,draw_at:string|null}>>
+     */
+    private function indexVisibleContests(array $merchants, \DateTimeImmutable $now): array
+    {
+        if ($merchants === []) {
+            return [];
+        }
+        $index = [];
+        $statuses = [ContestStatus::SCHEDULED, ContestStatus::ACTIVE];
+
+        foreach ($merchants as $merchant) {
+            if (!$merchant instanceof Merchant) {
+                continue;
+            }
+
+            $merchantId = $merchant->getId()?->toRfc4122();
+            if ($merchantId === null) {
+                continue;
+            }
+
+            $contests = $this->entityManager->getRepository(Contest::class)
+                ->createQueryBuilder('c')
+                ->where('c.merchant = :merchantId')
+                ->andWhere('c.status IN (:statuses)')
+                ->andWhere('c.endAt >= :now')
+                ->setParameter('merchantId', $merchant->getId(), 'uuid')
+                ->setParameter('statuses', $statuses)
+                ->setParameter('now', $now, 'datetime_immutable')
+                ->orderBy('c.startAt', 'ASC')
+                ->getQuery()
+                ->getResult();
+
+            foreach ($contests as $contest) {
+                if (!$contest instanceof Contest) {
+                    continue;
+                }
+
+                $contestId = $contest->getId()?->toRfc4122();
+                if ($contestId === null) {
+                    continue;
+                }
+
+                $rewardTitles = [];
+                foreach ($contest->getRewards() as $reward) {
+                    $rewardTitles[] = $reward->getTitle();
+                }
+
+                $index[$merchantId][] = [
+                    'id' => $contestId,
+                    'title' => $contest->getTitle(),
+                    'start_at' => $contest->getStartAt()?->format(DATE_ATOM) ?? '',
+                    'end_at' => $contest->getEndAt()?->format(DATE_ATOM) ?? '',
+                    'status' => $contest->getStatus()->value,
+                    'draw_at' => $contest->getDrawAt()?->format(DATE_ATOM),
+                    'rewards' => $rewardTitles,
+                ];
+            }
+        }
+
+        return $index;
+    }
+
+    private function nowInParis(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('now', new \DateTimeZone('Europe/Paris'));
     }
 }

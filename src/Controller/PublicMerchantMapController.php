@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Merchant;
 use App\Entity\MerchantGoogleReviewModule;
 use App\Entity\PromotionalOffer;
+use App\Repository\ContestRepository;
 use App\Repository\CustomerRepository;
 use App\Repository\MerchantGoogleReviewModuleRepository;
 use App\Repository\MerchantRepository;
@@ -28,6 +29,7 @@ final class PublicMerchantMapController extends AbstractController
         private readonly MerchantRepository $merchantRepository,
         private readonly CustomerRepository $customerRepository,
         private readonly MerchantGoogleReviewModuleRepository $googleReviewModuleRepository,
+        private readonly ContestRepository $contestRepository,
         private readonly EntityManagerInterface $entityManager,
         #[Autowire(service: 'limiter.public_map_view_limiter')]
         private readonly RateLimiterFactory $publicMapViewLimiter,
@@ -59,6 +61,88 @@ final class PublicMerchantMapController extends AbstractController
         return $this->buildMapResponse($request, true);
     }
 
+    /**
+     * GET /api/public/wmcp/contests
+     * Public WMCP listing of scheduled & active contests across claimed merchants.
+     * Includes contest info, schedule, and the list of rewards (lots) to win.
+     *
+     * Optional filters:
+     *  - merchant_id: restrict to a single merchant
+     *  - limit (default 50, max 100)
+     *  - offset (default 0)
+     */
+    #[Route('/api/public/wmcp/contests', name: 'public_wmcp_contests', methods: ['GET'])]
+    public function wmcpContests(Request $request): JsonResponse
+    {
+        $limiter = $this->publicMapViewLimiter->create((string) $request->getClientIp());
+        if (!$limiter->consume()->isAccepted()) {
+            return new JsonResponse(
+                ['error' => 'rate_limit_exceeded', 'retry_after' => 60],
+                429,
+                ['Retry-After' => '60']
+            );
+        }
+
+        $limit = (int) $request->query->get('limit', 50);
+        $limit = max(1, min($limit, 100));
+        $offset = max(0, (int) $request->query->get('offset', 0));
+
+        $merchantFilter = null;
+        $merchantIdRaw = trim((string) $request->query->get('merchant_id', ''));
+        if ($merchantIdRaw !== '') {
+            try {
+                $uuid = Uuid::fromString($merchantIdRaw);
+            } catch (\Throwable) {
+                return new JsonResponse(['error' => 'invalid_merchant_id'], 400);
+            }
+            $merchantFilter = $this->entityManager->getRepository(Merchant::class)->find($uuid);
+            if (!$merchantFilter instanceof Merchant || $merchantFilter->getUser() === null) {
+                return new JsonResponse(['contests' => [], 'total' => 0]);
+            }
+        }
+
+        $now = new \DateTimeImmutable('now');
+
+        try {
+            $contests = $this->contestRepository->findVisibleForPublicListing($now, $merchantFilter, $limit, $offset);
+        } catch (\Throwable) {
+            $contests = [];
+        }
+
+        $data = [];
+        foreach ($contests as $contest) {
+            $merchant = $contest->getMerchant();
+            if (!$merchant instanceof Merchant || $merchant->getUser() === null) {
+                continue;
+            }
+            $merchantId = $merchant->getId()?->toRfc4122();
+            if ($merchantId === null) {
+                continue;
+            }
+
+            $payload = $this->serializeContest($contest);
+            $payload['merchant'] = [
+                'id' => $merchantId,
+                'company_name' => $merchant->getCompanyName(),
+                'city' => $merchant->getCity(),
+                'postal_code' => $merchant->getPostalCode(),
+                'latitude' => $merchant->getLatitude(),
+                'longitude' => $merchant->getLongitude(),
+                'logo_url' => $merchant->getLogoUrl(),
+            ];
+            $data[] = $payload;
+        }
+
+        $response = new JsonResponse([
+            'contests' => $data,
+            'total' => count($data),
+        ]);
+        $response->setPublic();
+        $response->setMaxAge(300);
+
+        return $response;
+    }
+
     private function buildMapResponse(Request $request, bool $claimedOnly): JsonResponse
     {
         // Rate limit by IP
@@ -81,9 +165,11 @@ final class PublicMerchantMapController extends AbstractController
         $swLng = (float) $request->query->get('sw_lng', -5.1);
         $neLat = (float) $request->query->get('ne_lat', 51.1);
         $neLng = (float) $request->query->get('ne_lng', 9.6);
+        $establishmentType = trim((string) $request->query->get('establishment_type', ''));
+        $establishmentType = $establishmentType !== '' && $establishmentType !== 'all' ? $establishmentType : null;
 
         try {
-            $rows = $this->merchantRepository->findForMap($lat, $lng, $swLat, $swLng, $neLat, $neLng);
+            $rows = $this->merchantRepository->findForMap($lat, $lng, $swLat, $swLng, $neLat, $neLng, $establishmentType);
         } catch (\Exception) {
             $rows = [];
         }
@@ -99,7 +185,12 @@ final class PublicMerchantMapController extends AbstractController
             array_map(fn($row) => $row['merchant'], $rows),
         );
 
+        $now = new \DateTimeImmutable('now');
         $today = new \DateTimeImmutable('today');
+        $contestsByMerchant = $this->indexVisibleContests(
+            array_map(fn($row) => $row['merchant'], $rows),
+            $now,
+        );
         $merchants = [];
 
         foreach ($rows as $row) {
@@ -112,6 +203,9 @@ final class PublicMerchantMapController extends AbstractController
 
             $isClaimed = $merchant->getUser() !== null;
             if ($claimedOnly && !$isClaimed) {
+                continue;
+            }
+            if ($establishmentType !== null && $merchant->getEstablishmentType()?->getCode() !== $establishmentType) {
                 continue;
             }
 
@@ -162,8 +256,12 @@ final class PublicMerchantMapController extends AbstractController
                 'address' => $merchant->getAddress(),
                 'postal_code' => $merchant->getPostalCode(),
                 'city' => $merchant->getCity(),
+                'establishment_type' => $merchant->getEstablishmentType()?->getCode(),
                 'phone' => $merchant->getPhone(),
                 'logo_url' => $merchant->getLogoUrl(),
+                'instagram_url' => $merchant->getInstagramUrl(),
+                'tiktok_url' => $merchant->getTiktokUrl(),
+                'website_url' => $merchant->getWebsiteUrl(),
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
@@ -173,6 +271,7 @@ final class PublicMerchantMapController extends AbstractController
                 'has_active_content' => $hasActiveOffer || $hasActiveLoyaltyProgram,
                 'loyalty_programs' => $loyaltyPrograms,
                 'active_promotional_offers' => $activeOffers,
+                'active_contests' => $contestsByMerchant[$merchantId] ?? [],
                 'google_review' => $googleReview,
                 // Public signup link for this merchant
                 'subscribe_url' => sprintf('/?customer_signup=1&merchant_ref=%s&signup_type=landing_map', urlencode($merchantId)),
@@ -238,8 +337,9 @@ final class PublicMerchantMapController extends AbstractController
         }
 
         $today = new \DateTimeImmutable('today');
+        $now = new \DateTimeImmutable('now');
 
-        $merchants = array_map(function (array $row) use ($merchantById, $today): array {
+        $merchants = array_map(function (array $row) use ($merchantById, $today, $now): array {
             $merchantEntity = $merchantById[$row['id']] ?? null;
             $isClaimed = $merchantEntity instanceof Merchant && $merchantEntity->getUser() !== null;
             $hasLoyaltyPrograms = $merchantEntity instanceof Merchant
@@ -248,6 +348,9 @@ final class PublicMerchantMapController extends AbstractController
             $hasActiveOffers = $merchantEntity instanceof Merchant
                 ? ($isClaimed && count($this->collectActiveOffers($merchantEntity, $today)) > 0)
                 : false;
+            $hasActiveContests = $merchantEntity instanceof Merchant
+                ? ($isClaimed && count($this->serializeContestsForMerchant($merchantEntity, $now)) > 0)
+                : false;
 
             return [
                 'id' => $row['id'],
@@ -255,11 +358,16 @@ final class PublicMerchantMapController extends AbstractController
                 'address' => $row['address'],
                 'postal_code' => $row['postal_code'],
                 'city' => $row['city'],
+                'establishment_type' => $merchantEntity?->getEstablishmentType()?->getCode(),
+                'instagram_url' => $merchantEntity?->getInstagramUrl(),
+                'tiktok_url' => $merchantEntity?->getTiktokUrl(),
+                'website_url' => $merchantEntity?->getWebsiteUrl(),
                 'latitude' => $row['latitude'],
                 'longitude' => $row['longitude'],
                 'distance_km' => $row['distance_km'],
                 'has_loyalty_programs' => $hasLoyaltyPrograms,
                 'has_active_promotional_offers' => $hasActiveOffers,
+                'has_active_contests' => $hasActiveContests,
                 'is_claimed' => $isClaimed,
                 'subscribe_url' => sprintf('/?customer_signup=1&merchant_ref=%s&signup_type=landing_map', urlencode($row['id'])),
             ];
@@ -353,6 +461,7 @@ final class PublicMerchantMapController extends AbstractController
             'is_claimed' => $isClaimed,
             'loyalty_programs' => $loyaltyPrograms,
             'active_promotional_offers' => $activeOffers,
+            'active_contests' => $isClaimed ? $this->serializeContestsForMerchant($merchant, new \DateTimeImmutable('now')) : [],
             'google_review' => $googleReview,
             'subscribe_url' => sprintf('/?customer_signup=1&merchant_ref=%s&signup_type=landing_map', urlencode($merchantId)),
         ];
@@ -408,5 +517,77 @@ final class PublicMerchantMapController extends AbstractController
             'description' => $o->getDescription(),
             'ends_on' => $o->getEndsOn()?->format('Y-m-d'),
         ], $offers);
+    }
+
+    /**
+     * Index visible (scheduled/active, not yet ended) contests per merchant id.
+     *
+     * @param array<Merchant> $merchants
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function indexVisibleContests(array $merchants, \DateTimeImmutable $now): array
+    {
+        error_log("indexVisibleContests() called with " . count($merchants) . " merchants");
+        $merchants = array_values(array_filter($merchants, fn($m) => $m instanceof Merchant && $m->getUser() !== null));
+        error_log("After filter: " . count($merchants) . " claimed merchants");
+        
+        if (empty($merchants)) {
+            return [];
+        }
+
+        $contests = $this->contestRepository->findVisibleForMerchants($merchants, $now);
+        error_log("Found " . count($contests) . " visible contests");
+        
+        $index = [];
+        foreach ($contests as $contest) {
+            $mid = $contest->getMerchant()?->getId()?->toRfc4122();
+            if ($mid === null) {
+                continue;
+            }
+            error_log("Adding contest for merchant: " . $mid);
+            $index[$mid][] = $this->serializeContest($contest);
+        }
+        
+        error_log("Contest index keys: " . json_encode(array_keys($index)));
+
+        return $index;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function serializeContestsForMerchant(Merchant $merchant, \DateTimeImmutable $now): array
+    {
+        $contests = $this->contestRepository->findVisibleForMerchants([$merchant], $now);
+        return array_map(fn($contest) => $this->serializeContest($contest), $contests);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeContest(\App\Entity\Contest $contest): array
+    {
+        $rewards = [];
+        foreach ($contest->getRewards() as $reward) {
+            $rewards[] = [
+                'rank' => $reward->getRank(),
+                'title' => $reward->getTitle(),
+                'type' => $reward->getType()->value,
+                'image_url' => $reward->getImageUrl(),
+                'target_value' => $reward->getTargetValue(),
+                'reward_description' => $reward->getRewardDescription(),
+            ];
+        }
+
+        return [
+            'id' => $contest->getId()?->toRfc4122(),
+            'title' => $contest->getTitle(),
+            'description' => $contest->getDescription(),
+            'status' => $contest->getStatus()->value,
+            'start_at' => $contest->getStartAt()?->format(\DateTimeImmutable::ATOM),
+            'end_at' => $contest->getEndAt()?->format(\DateTimeImmutable::ATOM),
+            'draw_at' => $contest->getDrawAt()?->format(\DateTimeImmutable::ATOM),
+            'rewards' => $rewards,
+        ];
     }
 }

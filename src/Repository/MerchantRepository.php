@@ -44,7 +44,20 @@ class MerchantRepository extends ServiceEntityRepository
         float $swLng,
         float $neLat,
         float $neLng,
+        ?string $establishmentType = null,
     ): array {
+        $establishmentType = $establishmentType !== null ? trim($establishmentType) : null;
+        $establishmentType = $establishmentType !== '' ? $establishmentType : null;
+
+        $establishmentJoin = '';
+        $establishmentWhere = '';
+        $params = [
+            'sw_lat' => $swLat,
+            'sw_lng' => $swLng,
+            'ne_lat' => $neLat,
+            'ne_lng' => $neLng,
+        ];
+
         if ($lat !== null && $lng !== null) {
             // With user coords: compute distance for ordering and display
             $sql = '
@@ -55,37 +68,29 @@ class MerchantRepository extends ServiceEntityRepository
                         + SIN(RADIANS(:lat)) * SIN(RADIANS(latitude))
                     )) AS distance_km
                 FROM merchant
+                                ' . $establishmentJoin . '
                 WHERE latitude IS NOT NULL
                   AND longitude IS NOT NULL
                   AND latitude  BETWEEN :sw_lat AND :ne_lat
                   AND longitude BETWEEN :sw_lng AND :ne_lng
+                                    ' . $establishmentWhere . '
                 ORDER BY distance_km ASC
             ';
-            $params = [
-                'lat'    => $lat,
-                'lng'    => $lng,
-                'sw_lat' => $swLat,
-                'sw_lng' => $swLng,
-                'ne_lat' => $neLat,
-                'ne_lng' => $neLng,
-            ];
+                        $params['lat'] = $lat;
+                        $params['lng'] = $lng;
         } else {
             // No user coords: bounding box filter only, alphabetical order
             $sql = '
                 SELECT BIN_TO_UUID(id) AS id, NULL AS distance_km
                 FROM merchant
+                                ' . $establishmentJoin . '
                 WHERE latitude IS NOT NULL
                   AND longitude IS NOT NULL
                   AND latitude  BETWEEN :sw_lat AND :ne_lat
                   AND longitude BETWEEN :sw_lng AND :ne_lng
+                                    ' . $establishmentWhere . '
                 ORDER BY company_name ASC
             ';
-            $params = [
-                'sw_lat' => $swLat,
-                'sw_lng' => $swLng,
-                'ne_lat' => $neLat,
-                'ne_lng' => $neLng,
-            ];
         }
 
         $rows = $this->getEntityManager()
