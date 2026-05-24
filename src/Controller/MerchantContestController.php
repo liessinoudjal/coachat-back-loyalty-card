@@ -45,6 +45,8 @@ class MerchantContestController extends AbstractController
 
         $contests = $this->contestRepository->findByMerchantOrdered($merchant);
 
+        $this->refreshStatuses($contests);
+
         return new JsonResponse([
             'member' => array_map(fn (Contest $contest) => $this->formatContest($contest), $contests),
         ]);
@@ -519,27 +521,23 @@ class MerchantContestController extends AbstractController
 
     private function formatContest(Contest $contest): array
     {
-        $participantSummaries = [];
-        $participantCount = 0;
-        $participationCount = 0;
+        $this->refreshStatuses([$contest]);
 
-        if (in_array($contest->getStatus(), [ContestStatus::ACTIVE, ContestStatus::FINISHED], true)) {
-            $participantSummaries = array_map(
-                static fn (array $participant): array => [
-                    'customer_id' => $participant['customer_id'],
-                    'customer_name' => $participant['customer_name'],
-                    'customer_email' => $participant['customer_email'],
-                    'participation_count' => $participant['participation_count'],
-                ],
-                $this->participationRepository->getParticipantSummaries($contest),
-            );
-            $participantCount = count($participantSummaries);
-            $participationCount = array_reduce(
-                $participantSummaries,
-                static fn (int $carry, array $participant): int => $carry + (int) ($participant['participation_count'] ?? 0),
-                0,
-            );
-        }
+        $participantSummaries = array_map(
+            static fn (array $participant): array => [
+                'customer_id' => $participant['customer_id'],
+                'customer_name' => $participant['customer_name'],
+                'customer_email' => $participant['customer_email'],
+                'participation_count' => $participant['participation_count'],
+            ],
+            $this->participationRepository->getParticipantSummaries($contest),
+        );
+        $participantCount = count($participantSummaries);
+        $participationCount = array_reduce(
+            $participantSummaries,
+            static fn (int $carry, array $participant): int => $carry + (int) ($participant['participation_count'] ?? 0),
+            0,
+        );
 
         $winners = [];
         if (in_array($contest->getStatus(), [ContestStatus::ACTIVE, ContestStatus::FINISHED], true)) {
@@ -586,6 +584,41 @@ class MerchantContestController extends AbstractController
             'created_at' => $contest->getCreatedAt()?->format(DATE_ATOM),
             'updated_at' => $contest->getUpdatedAt()?->format(DATE_ATOM),
         ];
+    }
+
+    /**
+     * Transitions contest statuses based on the current time so the UI does not
+     * depend on the daily cron (`app:contests:dispatch`) for visual accuracy.
+     * SCHEDULED -> ACTIVE when startAt has passed.
+     * ACTIVE    -> FINISHED when endAt has passed.
+     *
+     * @param iterable<Contest> $contests
+     */
+    private function refreshStatuses(iterable $contests): void
+    {
+        $now = new \DateTimeImmutable();
+        $dirty = false;
+
+        foreach ($contests as $contest) {
+            $status = $contest->getStatus();
+            $startAt = $contest->getStartAt();
+            $endAt = $contest->getEndAt();
+
+            if ($status === ContestStatus::SCHEDULED && $startAt instanceof \DateTimeInterface && $startAt <= $now) {
+                $contest->setStatus(ContestStatus::ACTIVE);
+                $dirty = true;
+                $status = ContestStatus::ACTIVE;
+            }
+
+            if ($status === ContestStatus::ACTIVE && $endAt instanceof \DateTimeInterface && $endAt < $now) {
+                $contest->setStatus(ContestStatus::FINISHED);
+                $dirty = true;
+            }
+        }
+
+        if ($dirty) {
+            $this->entityManager->flush();
+        }
     }
 
     private function formatWinner(ContestWinner $winner): array

@@ -63,6 +63,7 @@ final class CustomerContestController extends AbstractController
 
         $contests = [];
         $activeCount = 0;
+        $dirty = false;
 
         foreach ($merchants as $merchant) {
             $merchantContests = $this->entityManager->getRepository(Contest::class)
@@ -85,6 +86,17 @@ final class CustomerContestController extends AbstractController
                 $contestId = $contest->getId()?->toRfc4122();
                 if ($contestId === null) {
                     continue;
+                }
+
+                // Auto-transition SCHEDULED -> ACTIVE so the customer UI does not
+                // rely on the daily cron `app:contests:dispatch`.
+                if (
+                    $contest->getStatus() === ContestStatus::SCHEDULED
+                    && $contest->getStartAt() instanceof \DateTimeInterface
+                    && $contest->getStartAt() <= $now
+                ) {
+                    $contest->setStatus(ContestStatus::ACTIVE);
+                    $dirty = true;
                 }
 
                 // Participation data for this customer
@@ -139,6 +151,10 @@ final class CustomerContestController extends AbstractController
                     'has_won' => $winningParticipation !== null,
                 ];
             }
+        }
+
+        if ($dirty) {
+            $this->entityManager->flush();
         }
 
         return new JsonResponse([
