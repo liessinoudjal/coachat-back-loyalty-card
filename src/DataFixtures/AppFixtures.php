@@ -12,7 +12,7 @@ class AppFixtures extends Fixture implements DependentFixtureInterface
 {
     public function getDependencies(): array
     {
-        return [PlanFixtures::class];
+        return [PlanFixtures::class, MerchantEstablishmentTypeFixtures::class];
     }
 
     public function load(ObjectManager $manager): void
@@ -37,6 +37,7 @@ class AppFixtures extends Fixture implements DependentFixtureInterface
         $merchant->setAddress('3 rue des carmes');
         $merchant->setCity('Orléans');
         $merchant->setPostalCode('45000');
+        $merchant->setEstablishmentType($this->getReference('merchant_establishment_type_restaurant', \App\Entity\MerchantEstablishmentType::class));
         $merchant->setIsFreeAccount(true);
 
 

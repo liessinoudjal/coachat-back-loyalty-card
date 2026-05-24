@@ -103,6 +103,16 @@
               "type": "string",
               "example": "Boulangerie"
             }
+          },
+          {
+            "name": "establishment_type",
+            "in": "query",
+            "description": "Filter merchants by establishment type code",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "restaurant"
+            }
           }
         ],
         "responses": {
@@ -275,6 +285,26 @@
             "type": ["string", "null"],
             "description": "Merchant phone number",
             "example": "01 23 45 67 89"
+          },
+          "establishment_type": {
+            "type": ["string", "null"],
+            "description": "Establishment type code",
+            "example": "restaurant"
+          },
+          "instagram_url": {
+            "type": ["string", "null"],
+            "description": "Instagram profile URL",
+            "example": "https://www.instagram.com/boulangerie.martin"
+          },
+          "tiktok_url": {
+            "type": ["string", "null"],
+            "description": "TikTok profile URL",
+            "example": "https://www.tiktok.com/@boulangerie.martin"
+          },
+          "website_url": {
+            "type": ["string", "null"],
+            "description": "Website URL",
+            "example": "https://boulangerie-martin.fr"
           },
           "logo_url": {
             "type": ["string", "null"],

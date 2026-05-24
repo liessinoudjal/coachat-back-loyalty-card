@@ -6,6 +6,7 @@ use App\Entity\Customer;
 use App\Entity\LoyaltyCard;
 use App\Entity\Merchant;
 use App\Entity\MerchantAssetDownloadEvent;
+use App\Entity\MerchantEstablishmentType;
 use App\Entity\Transaction;
 use App\Repository\CustomerRepository;
 use App\Repository\PlanRepository;
@@ -474,7 +475,11 @@ class MerchantController extends AbstractController
             'address' => $merchant->getAddress(),
             'postal_code' => $merchant->getPostalCode(),
             'city' => $merchant->getCity(),
+            'establishment_type' => $merchant->getEstablishmentType()?->getCode(),
             'logo_url' => $merchant->getLogoUrl(),
+            'instagram_url' => $merchant->getInstagramUrl(),
+            'tiktok_url' => $merchant->getTiktokUrl(),
+            'website_url' => $merchant->getWebsiteUrl(),
             'stripe_customer_id' => $merchant->getStripeCustomerId(),
             'trial_ends_at' => $merchant->getTrialEndsAt()?->format('Y-m-d\TH:i:s\Z'),
             'accepted_terms' => $merchant->isAcceptedTerms(),
@@ -578,6 +583,19 @@ class MerchantController extends AbstractController
         return $user->getCustomer()?->getStaffMerchant();
     }
 
+    #[Route('/api/merchant-establishment-types', name: 'merchant_establishment_types', methods: ['GET'])]
+    public function establishmentTypes(): JsonResponse
+    {
+        $types = $this->entityManager->createQueryBuilder()
+            ->select('t.code AS code', 't.label AS label')
+            ->from(MerchantEstablishmentType::class, 't')
+            ->orderBy('t.label', 'ASC')
+            ->getQuery()
+            ->getArrayResult();
+
+        return new JsonResponse($types);
+    }
+
     #[Route('/api/merchants', name: 'create_merchant', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -602,6 +620,26 @@ class MerchantController extends AbstractController
         }
         if (array_key_exists('address', $data) && $data['address'] !== null && !is_string($data['address'])) {
             return new JsonResponse(['error' => 'address must be a string or null'], 400);
+        }
+        $instagramUrl = $this->normalizeOptionalHttpUrl($data, 'instagram_url');
+        if ($instagramUrl === false) {
+            return new JsonResponse(['error' => 'instagram_url must be a valid http(s) URL or null'], 400);
+        }
+        $tiktokUrl = $this->normalizeOptionalHttpUrl($data, 'tiktok_url');
+        if ($tiktokUrl === false) {
+            return new JsonResponse(['error' => 'tiktok_url must be a valid http(s) URL or null'], 400);
+        }
+        $websiteUrl = $this->normalizeOptionalHttpUrl($data, 'website_url');
+        if ($websiteUrl === false) {
+            return new JsonResponse(['error' => 'website_url must be a valid http(s) URL or null'], 400);
+        }
+        $establishmentTypeCode = $this->normalizeEstablishmentType($data, 'establishment_type');
+        if ($establishmentTypeCode === false) {
+            return new JsonResponse(['error' => 'establishment_type must be a string code or null'], 400);
+        }
+        $establishmentType = $this->resolveEstablishmentType($establishmentTypeCode);
+        if ($establishmentTypeCode !== null && $establishmentType === null) {
+            return new JsonResponse(['error' => 'Unknown establishment_type code'], 400);
         }
         if (!array_key_exists('postal_code', $data)) {
             return new JsonResponse(['error' => 'postal_code required'], 400);
@@ -663,7 +701,11 @@ class MerchantController extends AbstractController
         $merchant->setAddress($data['address'] ?? null);
         $merchant->setPostalCode(trim($data['postal_code']));
         $merchant->setCity(trim($data['city']));
+        $merchant->setEstablishmentType($establishmentType);
         $merchant->setLogoUrl(null);
+        $merchant->setInstagramUrl($instagramUrl);
+        $merchant->setTiktokUrl($tiktokUrl);
+        $merchant->setWebsiteUrl($websiteUrl);
         $merchant->setAcceptedTerms(true);
         $merchant->setAcceptedTermsVersion(trim($data['accepted_terms_version']));
         $merchant->setAcceptedTermsAcceptedAt($acceptedAt);
@@ -755,6 +797,43 @@ class MerchantController extends AbstractController
             }
 
             $merchant->setCity($data['city'] !== null ? trim($data['city']) : null);
+        }
+        if (array_key_exists('establishment_type', $data)) {
+            $establishmentTypeCode = $this->normalizeEstablishmentType($data, 'establishment_type');
+            if ($establishmentTypeCode === false) {
+                return new JsonResponse(['error' => 'establishment_type must be a string code or null'], 400);
+            }
+
+            $establishmentType = $this->resolveEstablishmentType($establishmentTypeCode);
+            if ($establishmentTypeCode !== null && $establishmentType === null) {
+                return new JsonResponse(['error' => 'Unknown establishment_type code'], 400);
+            }
+
+            $merchant->setEstablishmentType($establishmentType);
+        }
+        if (array_key_exists('instagram_url', $data)) {
+            $instagramUrl = $this->normalizeOptionalHttpUrl($data, 'instagram_url');
+            if ($instagramUrl === false) {
+                return new JsonResponse(['error' => 'instagram_url must be a valid http(s) URL or null'], 400);
+            }
+
+            $merchant->setInstagramUrl($instagramUrl);
+        }
+        if (array_key_exists('tiktok_url', $data)) {
+            $tiktokUrl = $this->normalizeOptionalHttpUrl($data, 'tiktok_url');
+            if ($tiktokUrl === false) {
+                return new JsonResponse(['error' => 'tiktok_url must be a valid http(s) URL or null'], 400);
+            }
+
+            $merchant->setTiktokUrl($tiktokUrl);
+        }
+        if (array_key_exists('website_url', $data)) {
+            $websiteUrl = $this->normalizeOptionalHttpUrl($data, 'website_url');
+            if ($websiteUrl === false) {
+                return new JsonResponse(['error' => 'website_url must be a valid http(s) URL or null'], 400);
+            }
+
+            $merchant->setWebsiteUrl($websiteUrl);
         }
         if (array_key_exists('accepted_terms', $data)) {
             if ($data['accepted_terms'] !== true) {
@@ -858,5 +937,74 @@ class MerchantController extends AbstractController
         $this->entityManager->flush();
 
         return new JsonResponse($this->formatMerchant($merchant));
+    }
+
+    private function normalizeOptionalHttpUrl(array $data, string $key): string|false|null
+    {
+        if (!array_key_exists($key, $data)) {
+            return null;
+        }
+
+        $value = $data[$key];
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            return false;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+        if (mb_strlen($trimmed) > 255) {
+            return false;
+        }
+
+        $isValid = filter_var($trimmed, FILTER_VALIDATE_URL) !== false;
+        $scheme = (string) parse_url($trimmed, PHP_URL_SCHEME);
+        if (!$isValid || !in_array(strtolower($scheme), ['http', 'https'], true)) {
+            return false;
+        }
+
+        return $trimmed;
+    }
+
+    private function normalizeEstablishmentType(array $data, string $key): string|false|null
+    {
+        if (!array_key_exists($key, $data)) {
+            return null;
+        }
+
+        $value = $data[$key];
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            return false;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $normalized = strtolower($trimmed);
+        if (!preg_match('/^[a-z0-9_\\-]+$/', $normalized)) {
+            return false;
+        }
+
+        return $normalized;
+    }
+
+    private function resolveEstablishmentType(?string $code): ?MerchantEstablishmentType
+    {
+        if ($code === null) {
+            return null;
+        }
+
+        return $this->entityManager
+            ->getRepository(MerchantEstablishmentType::class)
+            ->findOneBy(['code' => $code]);
     }
 }

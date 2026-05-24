@@ -37,8 +37,21 @@ class Merchant
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $city = null;
 
+    #[ORM\ManyToOne(targetEntity: MerchantEstablishmentType::class)]
+    #[ORM\JoinColumn(name: 'establishment_type_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    private ?MerchantEstablishmentType $establishmentType = null;
+
     #[ORM\Column(type: Types::TEXT, nullable: true)]
     private ?string $logoUrl = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $instagramUrl = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $tiktokUrl = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $websiteUrl = null;
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $stripeCustomerId = null;
@@ -206,6 +219,18 @@ class Merchant
         return $this;
     }
 
+    public function getEstablishmentType(): ?MerchantEstablishmentType
+    {
+        return $this->establishmentType;
+    }
+
+    public function setEstablishmentType(?MerchantEstablishmentType $establishmentType): static
+    {
+        $this->establishmentType = $establishmentType;
+
+        return $this;
+    }
+
     public function getLogoUrl(): ?string
     {
         return $this->logoUrl;
@@ -214,6 +239,42 @@ class Merchant
     public function setLogoUrl(?string $logoUrl): static
     {
         $this->logoUrl = $logoUrl;
+
+        return $this;
+    }
+
+    public function getInstagramUrl(): ?string
+    {
+        return $this->instagramUrl;
+    }
+
+    public function setInstagramUrl(?string $instagramUrl): static
+    {
+        $this->instagramUrl = $instagramUrl;
+
+        return $this;
+    }
+
+    public function getTiktokUrl(): ?string
+    {
+        return $this->tiktokUrl;
+    }
+
+    public function setTiktokUrl(?string $tiktokUrl): static
+    {
+        $this->tiktokUrl = $tiktokUrl;
+
+        return $this;
+    }
+
+    public function getWebsiteUrl(): ?string
+    {
+        return $this->websiteUrl;
+    }
+
+    public function setWebsiteUrl(?string $websiteUrl): static
+    {
+        $this->websiteUrl = $websiteUrl;
 
         return $this;
     }

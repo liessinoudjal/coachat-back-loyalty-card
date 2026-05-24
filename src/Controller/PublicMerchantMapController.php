@@ -165,9 +165,11 @@ final class PublicMerchantMapController extends AbstractController
         $swLng = (float) $request->query->get('sw_lng', -5.1);
         $neLat = (float) $request->query->get('ne_lat', 51.1);
         $neLng = (float) $request->query->get('ne_lng', 9.6);
+        $establishmentType = trim((string) $request->query->get('establishment_type', ''));
+        $establishmentType = $establishmentType !== '' && $establishmentType !== 'all' ? $establishmentType : null;
 
         try {
-            $rows = $this->merchantRepository->findForMap($lat, $lng, $swLat, $swLng, $neLat, $neLng);
+            $rows = $this->merchantRepository->findForMap($lat, $lng, $swLat, $swLng, $neLat, $neLng, $establishmentType);
         } catch (\Exception) {
             $rows = [];
         }
@@ -201,6 +203,9 @@ final class PublicMerchantMapController extends AbstractController
 
             $isClaimed = $merchant->getUser() !== null;
             if ($claimedOnly && !$isClaimed) {
+                continue;
+            }
+            if ($establishmentType !== null && $merchant->getEstablishmentType()?->getCode() !== $establishmentType) {
                 continue;
             }
 
@@ -251,8 +256,12 @@ final class PublicMerchantMapController extends AbstractController
                 'address' => $merchant->getAddress(),
                 'postal_code' => $merchant->getPostalCode(),
                 'city' => $merchant->getCity(),
+                'establishment_type' => $merchant->getEstablishmentType()?->getCode(),
                 'phone' => $merchant->getPhone(),
                 'logo_url' => $merchant->getLogoUrl(),
+                'instagram_url' => $merchant->getInstagramUrl(),
+                'tiktok_url' => $merchant->getTiktokUrl(),
+                'website_url' => $merchant->getWebsiteUrl(),
                 'latitude' => $merchant->getLatitude(),
                 'longitude' => $merchant->getLongitude(),
                 'distance_km' => $row['distance_km'],
@@ -349,6 +358,10 @@ final class PublicMerchantMapController extends AbstractController
                 'address' => $row['address'],
                 'postal_code' => $row['postal_code'],
                 'city' => $row['city'],
+                'establishment_type' => $merchantEntity?->getEstablishmentType()?->getCode(),
+                'instagram_url' => $merchantEntity?->getInstagramUrl(),
+                'tiktok_url' => $merchantEntity?->getTiktokUrl(),
+                'website_url' => $merchantEntity?->getWebsiteUrl(),
                 'latitude' => $row['latitude'],
                 'longitude' => $row['longitude'],
                 'distance_km' => $row['distance_km'],
