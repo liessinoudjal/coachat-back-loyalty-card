@@ -7,6 +7,7 @@ use App\Entity\Customer;
 use App\Entity\Merchant;
 use App\Enum\ContestStatus;
 use App\Repository\ContestParticipationRepository;
+use App\Service\ContestParticipationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -134,6 +135,7 @@ final class CustomerContestController extends AbstractController
                     'rewards' => $rewards,
                     'is_participating' => $isParticipating,
                     'participation_count' => $participationCount,
+                    'participation_limit' => ContestParticipationService::MAX_PARTICIPATIONS_PER_CUSTOMER,
                     'has_won' => $winningParticipation !== null,
                 ];
             }
