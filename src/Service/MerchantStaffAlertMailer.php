@@ -47,7 +47,7 @@ class MerchantStaffAlertMailer
                 'Accédez à votre dashboard pour explorer vos nouvelles fonctionnalités.',
                 '',
                 'Cordialement,',
-                'L\'équipe Coachat',
+                'L\'équipe Lakarte',
             ]),
             htmlBody: $this->twig->render('emails/merchant_role_promoted.html.twig', [
                 'email_title' => 'Promotion confirmée',
@@ -94,7 +94,7 @@ class MerchantStaffAlertMailer
                 'Si vous avez des questions, veuillez contacter votre responsable.',
                 '',
                 'Cordialement,',
-                'L\'équipe Coachat',
+                'L\'équipe Lakarte',
             ]),
                 htmlBody: $this->twig->render('emails/merchant_role_demoted.html.twig', [
                     'email_title' => 'Changement de permissions',
@@ -148,7 +148,7 @@ class MerchantStaffAlertMailer
                 'Accédez immédiatement à votre dashboard pour confirmer cette accélération.',
                 '',
                 'Bienvenue cher propriétaire !',
-                'L\'équipe Coachat',
+                'L\'équipe Lakarte',
             ]),
                 htmlBody: $this->twig->render('emails/ownership_transfer_new_owner.html.twig', [
                     'email_title' => 'Nouveau propriétaire',
@@ -200,7 +200,7 @@ class MerchantStaffAlertMailer
                 'Si vous avez des questions concerning ce transfert, veuillez contacter votre équipe de gestion.',
                 '',
                 'Cordialement,',
-                'L\'équipe Coachat',
+                'L\'équipe Lakarte',
             ]),
                 htmlBody: $this->twig->render('emails/ownership_transfer_former_owner.html.twig', [
                     'email_title' => 'Perte de propriété',

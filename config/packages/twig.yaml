@@ -1,7 +1,9 @@
 twig:
     file_name_pattern: '*.twig'
     globals:
-        email_brand_logo_url: '%env(APP_FRONT_BASE_URL)%/logo.png'
+        email_brand_logo_url: '%env(APP_FRONT_BASE_URL)%/logo-LAKARTE-noir.png'
+        email_brand_logo_white_url: '%env(APP_FRONT_BASE_URL)%/logo-LAKARTE-blanc.png'
+        email_brand_name: 'Lakarte'
 
 when@test:
     twig:

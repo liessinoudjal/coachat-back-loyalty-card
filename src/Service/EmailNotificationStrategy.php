@@ -157,7 +157,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildEquipierAssignedEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $subject = sprintf('Votre espace équipier est actif chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre espace équipier est actif chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -175,7 +175,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Votre accès équipier est maintenant actif chez %s.', $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $customer->getName() ?? 'Utilisateur',
             'primary_label' => 'Compte',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -199,7 +199,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
     private function buildEquipierRemovedEmailData(Merchant $merchant, Customer $customer, array $context): array
     {
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
-        $subject = sprintf('Votre accès équipier a été désactivé chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre accès équipier a été désactivé chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -216,7 +216,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Votre accès équipier chez %s a été retiré.', $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $customer->getName() ?? 'Utilisateur',
             'primary_label' => 'Compte',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -243,8 +243,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $verifyUrl = (string) ($context['verify_url'] ?? '');
         $needsVerification = $verifyUrl !== '';
         $subject = $needsVerification
-            ? sprintf('Bienvenue chez %s — confirmez votre adresse email', $merchant->getCompanyName() ?? 'Coachat')
-            : sprintf('Bienvenue chez %s sur Coachat', $merchant->getCompanyName() ?? 'Coachat');
+            ? sprintf('Bienvenue chez %s — confirmez votre adresse email', $merchant->getCompanyName() ?? 'Lakarte')
+            : sprintf('Bienvenue chez %s sur Lakarte', $merchant->getCompanyName() ?? 'Lakarte');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", array_filter([
@@ -260,7 +260,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         ], static fn ($line) => $line !== null));
 
         $html = $this->twig->render('emails/customer_signup_welcome.html.twig', [
-            'email_title' => $needsVerification ? 'Bienvenue — confirmez votre email' : 'Bienvenue sur Coachat',
+            'email_title' => $needsVerification ? 'Bienvenue — confirmez votre email' : 'Bienvenue sur Lakarte',
             'email_eyebrow' => $needsVerification ? 'Activation requise' : 'Bienvenue client',
             'email_accent' => $needsVerification ? 'À CONFIRMER' : 'BIENVENUE',
             'summary' => $needsVerification
@@ -268,7 +268,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
                 : sprintf('Votre inscription chez %s est confirmée. Vous pouvez maintenant accéder à votre espace client.', $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $customer->getName() ?? 'Client',
             'primary_label' => 'Compte',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -295,7 +295,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $programName = (string) ($context['program_name'] ?? 'Carte fidélité');
         $targetValue = $context['target_value'] ?? null;
         $unitLabel = (string) ($context['unit_label'] ?? 'points');
-        $subject = sprintf('Votre carte fidélité est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre carte fidélité est prête chez %s', $merchant->getCompanyName() ?? 'Lakarte');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
@@ -314,7 +314,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Votre carte "%s" est prête. Vous pouvez maintenant la faire scanner chez %s.', $programName, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $programName,
             'primary_label' => 'Programme',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -341,7 +341,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $dashboardUrl = (string) ($context['dashboard_url'] ?? '');
         $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
         $programName = (string) ($context['program_name'] ?? 'Carte fidélité');
-        $subject = sprintf('Votre récompense est prête chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre récompense est prête chez %s', $merchant->getCompanyName() ?? 'Lakarte');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
@@ -359,7 +359,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Votre carte "%s" est complétée. Votre récompense "%s" est maintenant prête à être récupérée.', $programName, $rewardDescription),
             'primary_value' => $rewardDescription,
             'primary_label' => 'Récompense',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -390,7 +390,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $rewardReady = (bool) ($context['reward_ready'] ?? false);
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
-        $subject = sprintf('Votre carte %s a été mise à jour chez %s', $unitLabel, $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Votre carte %s a été mise à jour chez %s', $unitLabel, $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -408,7 +408,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('%d %s ont été ajoutés à votre carte chez %s.', $valueAdded, $unitLabel, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => sprintf('%d %s', $valueAdded, $unitLabel),
             'primary_label' => 'Ajoutés',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -437,7 +437,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $rewardDescription = (string) ($context['reward_description'] ?? 'Votre récompense');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
-        $subject = sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Récompense récupérée chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -455,7 +455,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Votre récompense "%s" a bien été récupérée chez %s.', $rewardDescription, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $rewardDescription,
             'primary_label' => 'Récompense',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -482,7 +482,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $offerDescription = (string) ($context['offer_description'] ?? 'Un nouveau bon plan est disponible.');
         $startsOn = (string) ($context['offer_starts_on'] ?? '');
         $endsOn = (string) ($context['offer_ends_on'] ?? '');
-        $subject = sprintf('Nouveau bon plan disponible chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Nouveau bon plan disponible chez %s', $merchant->getCompanyName() ?? 'Lakarte');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
@@ -502,7 +502,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Offre exceptionnelle chez %s : "%s".', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
             'primary_value' => $offerTitle,
             'primary_label' => 'Bon plan',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -533,7 +533,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $startsOn = (string) ($context['offer_starts_on'] ?? '');
         $endsOn = (string) ($context['offer_ends_on'] ?? '');
         $daysLeft = max(1, (int) ($context['days_left'] ?? 2));
-        $subject = sprintf('Plus que %d jours pour profiter du bon plan chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Plus que %d jours pour profiter du bon plan chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Lakarte');
         $googleReviewInviteContext = $this->buildGoogleReviewInviteContext($merchant, $context);
 
         $text = implode("\n", [
@@ -553,7 +553,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('"%s" se termine dans %d jours chez %s.', $offerTitle, $daysLeft, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $offerTitle,
             'primary_label' => 'Bon plan',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -583,7 +583,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $offerTitle = (string) ($context['offer_title'] ?? 'Offre flash');
         $offerDescription = (string) ($context['offer_description'] ?? 'Une offre exceptionnelle vous attend demain.');
         $offerDate = (string) ($context['offer_date'] ?? '');
-        $subject = sprintf('Demain chez %s : offre flash à ne pas manquer !', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Demain chez %s : offre flash à ne pas manquer !', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -602,7 +602,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Offre flash demain chez %s : "%s". Une seule journée, ne la manquez pas !', $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
             'primary_value' => $offerTitle,
             'primary_label' => 'Offre flash',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -632,7 +632,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $offerTitle = (string) ($context['offer_title'] ?? 'Offre flash');
         $offerDescription = (string) ($context['offer_description'] ?? "Une offre exceptionnelle est disponible aujourd'hui.");
         $offerDate = (string) ($context['offer_date'] ?? '');
-        $subject = sprintf("Aujourd'hui seulement chez %s : offre flash !", $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf("Aujourd'hui seulement chez %s : offre flash !", $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -651,7 +651,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf("Offre flash aujourd'hui chez %s : \"%s\". Dernière chance !", $merchant->getCompanyName() ?? 'ce commerce', $offerTitle),
             'primary_value' => $offerTitle,
             'primary_label' => 'Offre flash',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -685,7 +685,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $drawAt = $this->formatFrenchDateLabel((string) ($context['contest_draw_at'] ?? ''));
         $participationLimit = max(1, (int) ($context['participation_limit'] ?? 10));
         $contestRewards = $this->normalizeContestRewards($context['contest_rewards'] ?? null);
-        $subject = sprintf('Demain, nouveau jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Demain, nouveau jeu concours chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -713,7 +713,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Le jeu concours "%s" démarre demain chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $contestTitle,
             'primary_label' => 'Concours',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -749,7 +749,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $drawAt = $this->formatFrenchDateLabel((string) ($context['contest_draw_at'] ?? ''));
         $participationLimit = max(1, (int) ($context['participation_limit'] ?? 10));
         $contestRewards = $this->normalizeContestRewards($context['contest_rewards'] ?? null);
-        $subject = sprintf('Le jeu concours commence aujourd\'hui chez %s', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Le jeu concours commence aujourd\'hui chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -777,7 +777,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Le jeu concours "%s" démarre aujourd\'hui chez %s.', $contestTitle, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $contestTitle,
             'primary_label' => 'Concours',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -814,7 +814,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $participationLimit = max(1, (int) ($context['participation_limit'] ?? 10));
         $contestRewards = $this->normalizeContestRewards($context['contest_rewards'] ?? null);
         $daysLeft = max(1, (int) ($context['days_left'] ?? 2));
-        $subject = sprintf('Plus que %d jours pour participer au jeu concours chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Plus que %d jours pour participer au jeu concours chez %s', $daysLeft, $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -842,7 +842,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
             'summary' => sprintf('Le jeu concours "%s" se termine dans %d jours chez %s.', $contestTitle, $daysLeft, $merchant->getCompanyName() ?? 'ce commerce'),
             'primary_value' => $contestTitle,
             'primary_label' => 'Concours',
-            'secondary_value' => $merchant->getCompanyName() ?? 'Coachat',
+            'secondary_value' => $merchant->getCompanyName() ?? 'Lakarte',
             'secondary_label' => 'Commerçant',
             'customer' => $customer,
             'merchant' => $merchant,
@@ -879,7 +879,7 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $participationCount = max(0, (int) ($context['participation_count'] ?? 0));
         $participationLimit = max(1, (int) ($context['participation_limit'] ?? 10));
         $contestRewards = $this->normalizeContestRewards($context['contest_rewards'] ?? null);
-        $subject = sprintf('Tirage aujourd\'hui chez %s : bonne chance !', $merchant->getCompanyName() ?? 'Coachat');
+        $subject = sprintf('Tirage aujourd\'hui chez %s : bonne chance !', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),
@@ -945,8 +945,8 @@ class EmailNotificationStrategy implements NotificationStrategyInterface
         $participationLimit = max(1, (int) ($context['participation_limit'] ?? 10));
         $limitReached = (bool) ($context['limit_reached'] ?? false);
         $subject = $limitReached
-            ? sprintf('Limite de participation atteinte chez %s', $merchant->getCompanyName() ?? 'Coachat')
-            : sprintf('Participation enregistrée au jeu concours chez %s', $merchant->getCompanyName() ?? 'Coachat');
+            ? sprintf('Limite de participation atteinte chez %s', $merchant->getCompanyName() ?? 'Lakarte')
+            : sprintf('Participation enregistrée au jeu concours chez %s', $merchant->getCompanyName() ?? 'Lakarte');
 
         $text = implode("\n", [
             sprintf('Bonjour %s,', $customer->getName() ?? 'client'),

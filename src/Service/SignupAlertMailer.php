@@ -143,11 +143,11 @@ class SignupAlertMailer
         $customerEmail = $customer->getEmail() ?? $customer->getUser()?->getEmail() ?? 'n/a';
         $customerName = $customer->getName() ?? $customer->getUser()?->getName() ?? 'n/a';
 
-        $subject = sprintf('Nouveau client inscrit via la carte Coachat : %s', $customerName);
+        $subject = sprintf('Nouveau client inscrit via la carte Lakarte : %s', $customerName);
         $textBody = implode("\n", [
             sprintf('Bonjour %s,', $merchantName),
             '',
-            'Un nouveau client vient de rejoindre votre programme de fidélité depuis la carte interactive de l\'application Coachat.',
+            'Un nouveau client vient de rejoindre votre programme de fidélité depuis la carte interactive de l\'application Lakarte.',
             '',
             sprintf('Nom : %s', $customerName),
             sprintf('Email : %s', $customerEmail),

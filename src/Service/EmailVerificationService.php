@@ -158,7 +158,7 @@ class EmailVerificationService
                 'email_title' => 'Confirmez votre adresse email',
                 'email_eyebrow' => 'Activation du compte',
                 'email_accent' => 'Confirmation',
-                'summary' => 'Confirmez votre adresse email pour activer votre compte Coachat.',
+                'summary' => 'Confirmez votre adresse email pour activer votre compte Lakarte.',
                 'primary_label' => 'Adresse à confirmer',
                 'primary_value' => $recipient,
                 'secondary_label' => 'Validité du lien',
@@ -171,7 +171,7 @@ class EmailVerificationService
             $text = implode("\n", [
                 sprintf('Bonjour %s,', $name),
                 '',
-                'Merci de votre inscription sur Coachat.',
+                'Merci de votre inscription sur Lakarte.',
                 'Pour activer votre compte, veuillez confirmer votre adresse email en cliquant sur le lien ci-dessous :',
                 '',
                 $verifyUrl,
@@ -179,7 +179,7 @@ class EmailVerificationService
                 'Ce lien est valable 24 heures. Si vous n\'êtes pas à l\'origine de cette inscription, vous pouvez ignorer ce message.',
                 '',
                 'À très bientôt,',
-                'L\'équipe Coachat',
+                'L\'équipe Lakarte',
             ]);
 
             $email = (new Email())
