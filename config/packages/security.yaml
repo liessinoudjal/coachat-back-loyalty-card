@@ -60,6 +60,7 @@ security:
         - { path: ^/api/legal/terms/current-version, roles: PUBLIC_ACCESS }
         - { path: ^/api/plans, roles: PUBLIC_ACCESS }
         - { path: ^/api/subscription/webhook, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/campaign-qr/, roles: PUBLIC_ACCESS }
         # - { path: ^/admin, roles: ROLE_ADMIN }
         # - { path: ^/profile, roles: ROLE_USER }
 
